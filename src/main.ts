@@ -1,4 +1,5 @@
 // Ensure the web component is registered so <matterport-viewer> works
+import './style.css';
 import '@matterport/webcomponent';
 
 // Import your local component
