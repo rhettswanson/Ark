@@ -1,0 +1,18 @@
+/* make the page fill the window */
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+/* if you have a root container like #app, keep this; otherwise it's harmless */
+#app {
+  height: 100%;
+}
+
+/* make the Matterport viewer fill the viewport */
+matterport-viewer#mp-viewer {
+  display: block;      /* important for custom elements */
+  width: 100vw;
+  height: 100vh;       /* <-- critical */
+  background: #000;    /* optional, makes it obvious it's visible */
+}
