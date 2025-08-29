@@ -1,25 +1,19 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Matterport FOV Security Camera</title>
-
-    <!-- Use hosted fonts to avoid local font files/paths -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
   </head>
   <body>
     <matterport-viewer
-  id="mp-viewer"
-  m="1ghABoaBFPZ"
-  application-key="akqd0dp3hr9wz4eu70zd1rsab"
-  src="https://static.matterport.com/showcase-sdk/latest/showcase.html"
-  style="width:100vw;height:100vh;border:none;"
-></matterport-viewer>
+      id="mp-viewer"
+      m="1ghABoaBFPZ"
+      application-key="akqd0dp3hr9wz4eu70zd1rsab"
+      style="width:100vw;height:100vh;border:none;">
+    </matterport-viewer>
 
-    <!-- IMPORTANT: use ./src/... not /src/... -->
-    <script type="module" crossorigin src="./assets/index-DrpgYPjd.js"></script>
+    <!-- Vite needs the SOURCE entry, not a built asset -->
+    <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
