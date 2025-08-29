@@ -1,31 +1,23 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Matterport FOV Security Camera</title>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Matterport FOV Security Camera</title>
+  </head>
+  <body>
+    <matterport-viewer
+      id="mp-viewer"
+      m="1ghABoaBFPZ"
+      application-key="akqd0dp3hr9wz4eu70zd1rsab"
+      style="width:100vw;height:100vh;border:none;">
+    </matterport-viewer>
 
-  <!-- hosted font (no local /fonts paths) -->
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet">
-
-  <!-- optional page styles if you copied src/style.css to docs/style.css -->
-  <link rel="stylesheet" href="./style.css">
-</head>
-<body>
-  <matterport-viewer
-    id="mp-viewer"
-    m="1ghABoaBFPZ"
-    application-key="akqd0dp3hr9wz4eu70zd1rsab"
-    style="width:100vw;height:100vh;border:none;">
-  </matterport-viewer>
-
-  <!-- IMPORTANT: point to the built bundle INSIDE docs/assets -->
-  <!-- open docs/assets and copy the exact file name you see there -->
-  <script type="module" src="./assets/index-DrpgYPjd.js"></script>
-</body>
+    <!-- IMPORTANT: point to source, NOT assets -->
+    <script type="module" src="/src/main.ts"></script>
+  </body>
 </html>
+
 
 
 
