@@ -27,25 +27,37 @@
   ></matterport-viewer>
 
   <script type="module">
-    import "https://esm.sh/@matterport/webcomponent@0.1.45?deps=three@0.176.0";
-    const badge = document.getElementById("badge");
-    const viewer = document.querySelector("matterport-viewer");
-    viewer.addEventListener("mpSdkPlaying", async (evt) => {
-      try {
-        const mpSdk = evt.detail.mpSdk;
-        await mpSdk.App.state.waitUntilReady();
-        const info = await mpSdk.Model.getData();
-        badge.textContent = `SDK connected — model: ${info.sid}`;
-        // 🔜 we'll add Security Camera FOV + room-mesh here next
-      } catch (err) {
-        console.error(err);
-        badge.textContent = "SDK init failed (see console)";
+  import "https://esm.sh/@matterport/webcomponent@0.1.45?deps=three@0.176.0";
+
+  const badge  = document.getElementById("badge");
+  const viewer = document.querySelector("matterport-viewer");
+
+  viewer.addEventListener("mpSdkPlaying", async (evt) => {
+    try {
+      const mpSdk = evt.detail.mpSdk;
+
+      // Some SDK builds don’t expose waitUntilReady—skip it.
+      // If a wait API exists, use a safe fallback:
+      if (mpSdk?.App?.state?.waitUntil) {
+        await mpSdk.App.state.waitUntil(mpSdk.App.State.PLAYING).catch(()=>{});
       }
-    });
-    viewer.addEventListener("error", (e) => {
-      console.error("Matterport webcomponent error:", e);
-      badge.textContent = "viewer error (see console)";
-    });
-  </script>
+
+      const info = await mpSdk.Model.getData();
+      badge.textContent = `SDK connected — model: ${info.sid}`;
+
+      // sanity: make one call so we know SDK is responsive
+      const pose = await mpSdk.Camera.getPose();
+      console.log("pose", pose);
+    } catch (err) {
+      console.error(err);
+      badge.textContent = "SDK init failed (see console)";
+    }
+  });
+
+  viewer.addEventListener("error", (e) => {
+    console.error("Matterport webcomponent error:", e);
+    badge.textContent = "viewer error (see console)";
+  });
+</script>
 </body>
 </html>
