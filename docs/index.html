@@ -4,27 +4,24 @@
     <meta charset="utf-8" />
     <title>Ark – Security Camera FOV</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- built file paths are relative to /Ark/docs/ -->
+    <link rel="stylesheet" href="./assets/index-DuKT3xuU.css" />
+
     <style>
       html, body { height: 100%; margin: 0; }
-      matterport-viewer {
-        display: block;
-        position: fixed;
-        inset: 0;
-        border: 0;
-      }
+      matterport-viewer { position: fixed; inset: 0; border: 0; display: block; }
     </style>
-
-    <!-- built by Vite into /Ark/docs/assets/ -->
-    <link rel="stylesheet" href="./assets/index-DuKT3xuU.css" />
   </head>
   <body>
-    <!-- Web component version (your main.ts listens for mpSdkPlaying) -->
+    <!-- Web component (no iframe). Your main.ts listens for mpSdkPlaying -->
     <matterport-viewer
       id="mp-viewer"
       model-id="1ghABoaBFPZ"
       application-key="akqd0dp3hr9wz4eu70zd1rsab">
     </matterport-viewer>
 
-    <script type="module" crossorigin src="./assets/index-DvSeal55.js"></script>
+    <!-- IMPORTANT: exact casing; capital “I” in SeaI -->
+    <script type="module" crossorigin src="./assets/index-DvSeaI55.js"></script>
   </body>
 </html>
