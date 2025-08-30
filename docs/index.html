@@ -36,16 +36,11 @@
     try {
       const mpSdk = evt.detail.mpSdk;
 
-      // Some SDK builds don’t expose waitUntilReady—skip it.
-      // If a wait API exists, use a safe fallback:
-      if (mpSdk?.App?.state?.waitUntil) {
-        await mpSdk.App.state.waitUntil(mpSdk.App.State.PLAYING).catch(()=>{});
-      }
-
+      // No waiting needed—mpSdkPlaying fires when Showcase is playing.
       const info = await mpSdk.Model.getData();
       badge.textContent = `SDK connected — model: ${info.sid}`;
 
-      // sanity: make one call so we know SDK is responsive
+      // sanity ping
       const pose = await mpSdk.Camera.getPose();
       console.log("pose", pose);
     } catch (err) {
