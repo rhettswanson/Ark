@@ -1,12 +1,13 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Ark – Security Camera FOV</title>
   <style>
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
+    #wrap { height:100%; display:grid; }
     #mp { width:100%; height:100%; border:0; display:block; }
     .badge {
       position:absolute; left:10px; top:10px; z-index:5;
@@ -18,176 +19,108 @@
 <body>
   <div class="badge" id="badge">loading…</div>
 
-  <iframe
-    id="mp"
-    allow="xr-spatial-tracking; fullscreen"
-    allowfullscreen
-    src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1&qs=1&title=0&brand=0">
-  </iframe>
+  <!-- Your space (IFRAME viewer) -->
+  <div id="wrap">
+    <iframe
+      id="mp"
+      allow="xr-spatial-tracking; fullscreen"
+      allowfullscreen
+      src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1&qs=1&title=0&brand=0">
+    </iframe>
+  </div>
 
+  <!-- 1) Load the Matterport IFRAME SDK -->
+  <script src="https://static.matterport.com/showcase-sdk/latest.js"></script>
+
+  <!-- 2) Your page code -->
   <script>
   (function () {
     const SDK_KEY = "akqd0dp3hr9wz4eu70zd1rsab";
     const iframe  = document.getElementById("mp");
     const badge   = document.getElementById("badge");
-    const SDK_URL = "https://static.matterport.com/showcase-sdk/latest.js";
 
-    async function loadIframeSdk() {
-      if (window.MP_SDK) {
-        console.log("[Ark] MP_SDK already present");
-        return true;
-      }
-      console.log("[Ark] Loading IFRAME SDK:", SDK_URL);
-      return new Promise((resolve) => {
-        const s = document.createElement("script");
-        s.src = SDK_URL;
-        s.onload = () => {
-          console.log("[Ark] IFRAME SDK loaded. MP_SDK type:", typeof window.MP_SDK);
-          resolve(!!window.MP_SDK);
-        };
-        s.onerror = (e) => {
-          console.error("[Ark] IFRAME SDK failed to load", e);
-          resolve(false);
-        };
-        document.head.appendChild(s);
+    function fail(msg) {
+      console.error(msg);
+      badge.textContent = msg;
+    }
+
+    // Wait until the MP SDK script defines window.MP_SDK
+    function waitForSdk(maxMs = 8000) {
+      return new Promise((resolve, reject) => {
+        const t0 = performance.now();
+        (function poll() {
+          if (window.MP_SDK && typeof window.MP_SDK.connect === "function") return resolve();
+          if (performance.now() - t0 > maxMs) return reject(new Error("IFRAME SDK failed to load"));
+          requestAnimationFrame(poll);
+        })();
       });
     }
 
-    iframe.addEventListener("load", async () => {
+    async function main() {
       try {
-        const ok = await loadIframeSdk();
-        if (!ok) {
-          badge.textContent = "SDK blocked (see console)";
-          console.error(
-            "[Ark] The SDK script didn't load. In DevTools → Network, filter for 'sdk.js'. " +
-            "If you see ERR_BLOCKED_BY_CLIENT, allowlist static.matterport.com (ad/content blocker)."
-          );
-          return;
+        await waitForSdk();
+      } catch (e) {
+        return fail("[Ark] The SDK script didn't load. Check ad/content blockers and allowlist static.matterport.com");
+      }
+
+      let sdk;
+      try {
+        sdk = await window.MP_SDK.connect(iframe, SDK_KEY /*, '3.3' optional */);
+        badge.textContent = "SDK connected";
+      } catch (e) {
+        return fail("[Ark] MP_SDK.connect() failed: " + e);
+      }
+
+      // Load our plugin (runs INSIDE Showcase)
+      try {
+        const url = "/Ark/plugins/security-cam.js?v=1";
+        if (sdk.App.loadPlugin) {
+          await sdk.App.loadPlugin(url);
+        } else if (sdk.App.showPlugin) {
+          await sdk.App.showPlugin(url);
+        } else {
+          console.warn("No loadPlugin/showPlugin on this build; attempting fallback");
+          // Fallback: some very old builds call our global hook automatically.
         }
-
-        console.log("[Ark] Calling MP_SDK.connect…");
-        const sdk = await window.MP_SDK.connect(iframe, SDK_KEY, "3.2");
-
-        const info = await sdk.Model.getData();
-        badge.textContent = `SDK connected — model: ${info.sid}`;
-        console.log("[Ark] Connected. pose:", await sdk.Camera.getPose());
-
-        // ---------- Security Camera FOV component ----------
-        sdk.Scene.register("ark.securityCam", () => {
-          return class SecurityCam extends sdk.Scene.Component {
-            static schema = {
-              inputs: {
-                near:              { type: "number",  default: 0.30 },
-                far:               { type: "number",  default: 12.0 },
-                hfovDeg:           { type: "number",  default: 90 },
-                aspect:            { type: "number",  default: 16/9 },
-                color:             { type: "number",  default: 0x00aaff },
-                opacity:           { type: "number",  default: 0.18 },
-                wireOpacity:       { type: "number",  default: 0.60 },
-                worldPosition:     { type: "vec3",    default: { x:0, y:2.6, z:0 } },
-                worldRotationQuat: { type: "quat",    default: { x:0, y:0, z:0, w:1 } },
-                worldEulerDeg:     { type: "vec3",    default: { x:0, y:0, z:0 } },
-                panEnabled:        { type: "boolean", default: false },
-                panAngleDeg:       { type: "number",  default: 60 },
-                panPeriodSec:      { type: "number",  default: 8 }
-              }
-            };
-
-            _get(n){ const i=this.inputs; if(i?.get) return i.get(n); if(n in i) return i[n];
-              return this.constructor.schema.inputs[n]?.default; }
-
-            onInit(){
-              const T = this.context.three;
-              this.root=new T.Group(); this.yaw=new T.Group(); this.pitch=new T.Group();
-              this.root.add(this.yaw); this.yaw.add(this.pitch);
-
-              this.material=new T.MeshBasicMaterial({
-                color:this._get("color"), transparent:true, opacity:this._get("opacity"),
-                depthWrite:false, side:T.DoubleSide
-              });
-              this.lineMat=new T.LineBasicMaterial({
-                color:this._get("color"), transparent:true, opacity:this._get("wireOpacity")
-              });
-
-              this._buildFrustum(); this._applyTransform();
-              this.outputs.objectRoot=this.root; this._t=0;
-            }
-
-            _buildFrustum(){
-              const T=this.context.three;
-              const n=this._get("near"), f=this._get("far");
-              const hf=T.MathUtils.degToRad(this._get("hfovDeg")), a=this._get("aspect");
-              const vf=2*Math.atan(Math.tan(hf/2)/a);
-
-              const nw=Math.tan(hf/2)*n, nh=Math.tan(vf/2)*n;
-              const fw=Math.tan(hf/2)*f, fh=Math.tan(vf/2)*f;
-
-              const V=[[-nw,nh,-n],[nw,nh,-n],[nw,-nh,-n],[-nw,-nh,-n],[-fw,fh,-f],[fw,fh,-f],[fw,-fh,-f],[-fw,-fh,-f]];
-              const idx=[0,1,2,0,2,3, 4,6,5,4,7,6, 0,4,5,0,5,1, 1,5,6,1,6,2, 2,6,7,2,7,3, 3,7,4,3,4,0];
-
-              const pos=new Float32Array(idx.length*3);
-              for(let i=0;i<idx.length;i++){const p=V[idx[i]]; pos[i*3]=p[0]; pos[i*3+1]=p[1]; pos[i*3+2]=p[2];}
-              const g=new T.BufferGeometry(); g.setAttribute("position", new T.BufferAttribute(pos,3));
-
-              const ep=[0,1,1,2,2,3,3,0,4,5,5,6,6,7,7,4,0,4,1,5,2,6,3,7];
-              const epos=new Float32Array(ep.length*3);
-              for(let i=0;i<ep.length;i++){const p=V[ep[i]]; epos[i*3]=p[0]; epos[i*3+1]=p[1]; epos[i*3+2]=p[2];}
-              const eg=new T.BufferGeometry(); eg.setAttribute("position", new T.BufferAttribute(epos,3));
-
-              if(!this.mesh){ this.mesh=new T.Mesh(g,this.material); this.wire=new T.LineSegments(eg,this.lineMat); this.pitch.add(this.mesh,this.wire);}
-              else { this.mesh.geometry?.dispose(); this.wire.geometry?.dispose(); this.mesh.geometry=g; this.wire.geometry=eg; }
-            }
-
-            _applyTransform(){
-              const T=this.context.three, wp=this._get("worldPosition"), q=this._get("worldRotationQuat"), e=this._get("worldEulerDeg");
-              this.root.position.set(wp.x,wp.y,wp.z);
-              if(q && "w" in q) this.root.quaternion.set(q.x,q.y,q.z,q.w);
-              else this.root.rotation.set(
-                T.MathUtils.degToRad(e.x||0),
-                T.MathUtils.degToRad(e.y||0),
-                T.MathUtils.degToRad(e.z||0),
-                "YXZ"
-              );
-              this.yaw.rotation.set(0,0,0); this.pitch.rotation.set(0,0,0);
-            }
-
-            onInputsChanged(){ this._buildFrustum(); this._applyTransform(); }
-
-            onTick(dt){
-              if(!this._get("panEnabled")) return;
-              const T=this.context.three; this._t+=dt;
-              const amp=T.MathUtils.degToRad(this._get("panAngleDeg")||60);
-              const w=(2*Math.PI)/(this._get("panPeriodSec")||8);
-              this.yaw.rotation.y = Math.sin(this._t*w) * amp;
-            }
-          };
-        });
-
-        async function addCamAtViewer(hfov=90){
-          const pose = await sdk.Camera.getPose();
-          const node = await sdk.Scene.createNode();
-          const comp = node.addComponent("ark.securityCam");
-          const inputs = {
-            worldPosition: pose.position,
-            worldRotationQuat: pose.rotation,
-            hfovDeg: hfov, aspect: 16/9, near: 0.3, far: 12,
-            color: 0x00aaff, opacity: 0.18, wireOpacity: 0.6, panEnabled: false
-          };
-          if (comp.inputs?.set) comp.inputs.set(inputs);
-          else Object.assign(comp.inputs, inputs);
-          await node.start();
-          console.log("[Ark] security cam added", node);
-          return node;
-        }
-
-        await addCamAtViewer(90);
-        window.addCamAtViewer = addCamAtViewer;
-
+        console.log("[ark] plugin loaded");
       } catch (e) {
         console.error(e);
-        badge.textContent = "SDK init failed (see console)";
+        return fail("[Ark] Failed to load plugin (see console)");
       }
-    });
+
+      // Helper to add a camera at the current viewer pose
+      async function addCamAtViewer(hfov = 90) {
+        const pose = await sdk.Camera.getPose();
+        const node = await sdk.Scene.createNode();
+        node.addComponent("ark.securityCam", {
+          worldPosition: pose.position,
+          worldRotationQuat: pose.rotation,
+          hfovDeg: hfov,
+          aspect: 16/9,
+          near: 0.3,
+          far: 12,
+          color: 0x00aaff,
+          opacity: 0.18,
+          wireOpacity: 0.6,
+          panEnabled: false
+        });
+        await node.start();
+        console.log("[ark] security cam added at viewer pose");
+        return node;
+      }
+
+      // Add one immediately
+      await addCamAtViewer(90);
+
+      // Expose helper for console use
+      window.addCamAtViewer = addCamAtViewer;
+
+      // Quick sanity ping
+      console.log("pose", await sdk.Camera.getPose());
+      badge.textContent = "SDK + plugin ready";
+    }
+
+    main();
   })();
   </script>
 </body>
