@@ -203,9 +203,11 @@
       });
 
       // helper: add one camera at the viewer's current pose
+      // (uses Scene.add if available, else falls back to Graph API)
       async function addCamAtViewer(hfov = 90) {
         const pose = await sdk.Camera.getPose();
-        const id = await sdk.Scene.add("ark.securityCam", {
+
+        const inputs = {
           worldPosition: pose.position,
           worldRotationQuat: pose.rotation,
           hfovDeg: hfov,
@@ -216,9 +218,32 @@
           opacity: 0.18,
           wireOpacity: 0.6,
           panEnabled: false
-        });
-        console.log("security cam added:", id);
-        return id;
+        };
+
+        // Newer SDKs
+        if (sdk.Scene && typeof sdk.Scene.add === "function") {
+          const id = await sdk.Scene.add("ark.securityCam", inputs);
+          console.log("security cam added (add):", id);
+          return id;
+        }
+
+        // Fallback: Graph API
+        if (sdk.Scene && typeof sdk.Scene.createNode === "function") {
+          const node = await sdk.Scene.createNode();
+          const comp = node.addComponent("ark.securityCam");
+
+          if (comp?.inputs?.set) {
+            comp.inputs.set(inputs);
+          } else if (comp?.inputs) {
+            Object.assign(comp.inputs, inputs);
+          }
+
+          await node.start(); // attach to scene
+          console.log("security cam added (node):", node);
+          return comp || node;
+        }
+
+        throw new Error("Scene API not available on this SDK build");
       }
 
       // add one immediately
