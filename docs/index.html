@@ -43,31 +43,37 @@
 
       const sdk = mpSdk;
 
-      // ---- SecurityCam component (back-compatible inputs) ----
+      // ---------- SecurityCam component (with static schema) ----------
       sdk.Scene.register("ark.securityCam", () => {
         return class SecurityCam extends sdk.Scene.Component {
-
-          // Old Graph API expects descriptors (type/default). Newer API tolerates both.
-          inputs = {
-            near:              { type: "number",  default: 0.30 },
-            far:               { type: "number",  default: 12.0 },
-            hfovDeg:           { type: "number",  default: 90 },
-            aspect:            { type: "number",  default: 16/9 },
-            color:             { type: "number",  default: 0x00ff88 },
-            opacity:           { type: "number",  default: 0.15 },
-            wireOpacity:       { type: "number",  default: 0.55 },
-            worldPosition:     { type: "vec3",    default: { x: 0, y: 2.6, z: 0 } },
-            worldRotationQuat: { type: "quat",    default: { x:0, y:0, z:0, w:1 } },
-            worldEulerDeg:     { type: "vec3",    default: { x: 0, y: 0, z: 0 } },
-            panEnabled:        { type: "boolean", default: false },
-            panAngleDeg:       { type: "number",  default: 60 },
-            panPeriodSec:      { type: "number",  default: 8 }
+          // Back-compat: older Graph API reads a "schema.inputs" object
+          // with { type, default } descriptors.
+          static schema = {
+            inputs: {
+              near:              { type: "number",  default: 0.30 },
+              far:               { type: "number",  default: 12.0 },
+              hfovDeg:           { type: "number",  default: 90 },
+              aspect:            { type: "number",  default: 16/9 },
+              color:             { type: "number",  default: 0x00ff88 },
+              opacity:           { type: "number",  default: 0.15 },
+              wireOpacity:       { type: "number",  default: 0.55 },
+              worldPosition:     { type: "vec3",    default: { x: 0, y: 2.6, z: 0 } },
+              worldRotationQuat: { type: "quat",    default: { x:0, y:0, z:0, w:1 } },
+              worldEulerDeg:     { type: "vec3",    default: { x: 0, y: 0, z: 0 } },
+              panEnabled:        { type: "boolean", default: false },
+              panAngleDeg:       { type: "number",  default: 60 },
+              panPeriodSec:      { type: "number",  default: 8 }
+            }
           };
 
-          // helper to read inputs on both old/new APIs
+          // helper that works with both old/new input proxies
           _get(name) {
-            const inp = this.inputs;
-            return typeof inp.get === "function" ? inp.get(name) : inp[name];
+            const i = this.inputs;
+            if (i && typeof i.get === "function") return i.get(name);
+            if (i && name in i) return i[name];
+            // final fallback to schema default (first frame before proxies ready)
+            const s = this.constructor.schema?.inputs?.[name];
+            return s?.default;
           }
 
           onInit() {
@@ -173,7 +179,6 @@
           }
 
           onInputsChanged() {
-            // simple + robust: rebuild geometry and reapply transform
             this._buildFrustum();
             this._applyTransform();
           }
@@ -189,10 +194,9 @@
         };
       });
 
-      // ---- helper: add one camera at the viewer's current pose ----
+      // helper: add one at the viewer's current pose (Scene.add or Graph fallback)
       async function addCamAtViewer(hfov = 90) {
         const pose = await sdk.Camera.getPose();
-
         const inputs = {
           worldPosition: pose.position,
           worldRotationQuat: pose.rotation,
@@ -206,23 +210,19 @@
           panEnabled: false
         };
 
-        // Newer API
         if (sdk.Scene && typeof sdk.Scene.add === "function") {
           const id = await sdk.Scene.add("ark.securityCam", inputs);
           console.log("security cam added (add):", id);
           return id;
         }
 
-        // Fallback: Graph API
         if (sdk.Scene && typeof sdk.Scene.createNode === "function") {
           const node = await sdk.Scene.createNode();
           const comp = node.addComponent("ark.securityCam");
 
-          if (comp?.inputs?.set) {
-            comp.inputs.set(inputs);
-          } else if (comp?.inputs) {
-            Object.assign(comp.inputs, inputs);
-          }
+          // On some builds inputs is a proxy with set(); on others it's a plain object.
+          if (comp?.inputs?.set) comp.inputs.set(inputs);
+          else if (comp?.inputs) Object.assign(comp.inputs, inputs);
 
           await node.start();
           console.log("security cam added (node):", node);
@@ -232,7 +232,6 @@
         throw new Error("Scene API not available on this SDK build");
       }
 
-      // add one immediately and expose helper
       await addCamAtViewer(90);
       window.addCamAtViewer = addCamAtViewer;
 
