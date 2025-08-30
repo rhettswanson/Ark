@@ -1,20 +1,55 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Matterport FOV Security Camera</title>
-   <link rel="stylesheet" href="assets/index-DuKT3xuU.css" />
-<script type="module" crossorigin src="assets/index-DvSeaI55.js"></script>
-  </head>
-  <body>
-    <matterport-viewer
-      id="mp-viewer"
-      m="1ghABoaBFPZ"
-      application-key="akqd0dp3hr9wz4eu70zd1rsab"
-      style="width:100vw;height:100vh;border:none;">
-    </matterport-viewer>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ark • Matterport</title>
 
-    <!-- Vite needs the SOURCE entry, not a built asset -->
-  </body>
+  <!-- Full-page iframe layout -->
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #mp-wrap { position: fixed; inset: 0; }
+    #mp-iframe { width: 100%; height: 100%; border: 0; }
+  </style>
+
+  <!-- Matterport Showcase SDK (hosted by Matterport) -->
+  <script src="https://static.matterport.com/showcase-sdk/latest.js"></script>
+</head>
+<body>
+  <div id="mp-wrap">
+    <iframe
+      id="mp-iframe"
+      src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1&qs=1&title=0&brand=0"
+      frameborder="0"
+      allow="xr-spatial-tracking; fullscreen; autoplay; accelerometer; gyroscope"
+      allowfullscreen
+    ></iframe>
+  </div>
+
+  <script>
+    // Connect to the SDK
+    (async () => {
+      try {
+        const iframe = document.getElementById('mp-iframe');
+        const sdk = await MP_SDK.connect(iframe, 'akqd0dp3hr9wz4eu70zd1rsab', 'latest');
+
+        // Example: confirm connection and log the model SID
+        const model = await sdk.Model.getData();
+        console.log('Connected to model:', model.sid);
+
+        // Example: listen for camera pose updates
+        const unsub = sdk.Camera.pose.subscribe((pose) => {
+          // console.log('pose', pose.position, pose.rotation);
+        });
+
+        // Example: programmatically go fullscreen
+        // await sdk.App.goFullscreen();
+      } catch (err) {
+        console.error('MP_SDK.connect failed:', err);
+        // Most common cause: your domain isn’t allowed for the SDK key.
+        // Make sure "rhettswanson.github.io" (and localhost if needed) is on the allowlist.
+      }
+    })();
+  </script>
+</body>
 </html>
