@@ -3,72 +3,49 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ark – Matterport Viewer</title>
+  <title>Ark – Matterport (Web Component)</title>
   <style>
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
-    ark-mp { display:block; inline-size:100%; block-size:100dvh; }
-    .badge {
-      position: absolute; left: 10px; top: 10px;
-      padding: 6px 10px; font: 12px/1.2 system-ui;
-      background: rgba(0,0,0,.55); border:1px solid #333; border-radius: 8px;
-    }
+    matterport-viewer { display:block; inline-size:100%; block-size:100dvh; }
+    .badge { position:absolute; left:10px; top:10px; z-index:5;
+      padding:6px 10px; font:12px system-ui;
+      background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px; }
   </style>
 </head>
 <body>
-  <ark-mp></ark-mp>
+  <div class="badge" id="badge">loading…</div>
+
+  <matterport-viewer
+    m="1ghABoaBFPZ"
+    application-key="akqd0dp3hr9wz4eu70zd1rsab"
+    asset-base="/Ark/mp-assets"
+    play
+    title="false"
+    brand="false"
+    style="outline:0"
+  ></matterport-viewer>
 
   <script type="module">
-    // Load the Matterport web component (ESM) and pin a compatible THREE version
     import "https://esm.sh/@matterport/webcomponent@0.1.45?deps=three@0.176.0";
-
-    // Your IDs
-    const MODEL = "1ghABoaBFPZ";
-    const KEY   = "akqd0dp3hr9wz4eu70zd1rsab";
-
-    class ArkMp extends HTMLElement {
-      constructor(){ super(); this.attachShadow({ mode: "open" }); }
-      connectedCallback(){
-        const host  = document.createElement("div");
-        host.style.cssText = "position:relative;width:100%;height:100%;";
-        const badge = document.createElement("div");
-        badge.className = "badge";
-        badge.textContent = "loading…";
-        this.shadowRoot.append(host, badge);
-
-        // Use src= so we don't need to host Matterport assets on GitHub Pages
-        const mp = document.createElement("matterport-viewer");
-        mp.style.cssText = "display:block;width:100%;height:100%;";
-        mp.setAttribute(
-          "src",
-          `https://my.matterport.com/show/?m=${MODEL}&applicationKey=${KEY}&qs=1&brand=0&title=0&play=1`
-        );
-        host.appendChild(mp);
-
-        mp.addEventListener("error", (e) => {
-          console.error("Matterport webcomponent error:", e);
-          badge.textContent = "viewer error (see console)";
-        });
-
-        // When the SDK is available:
-        mp.addEventListener("mpSdkPlaying", async (evt) => {
-          try {
-            const mpSdk = evt.detail.mpSdk;
-            await mpSdk.App.state.waitUntilReady();
-            const info = await mpSdk.Model.getData();
-            badge.textContent = `SDK connected — model: ${info.sid}`;
-            // ✅ Place to wire Security Camera FOV + room-mesh logic next
-            // e.g.:
-            // const pose = await mpSdk.Camera.getPose();
-            // console.log("pose", pose);
-          } catch (err) {
-            console.error(err);
-            badge.textContent = "SDK init failed (see console)";
-          }
-        });
+    const badge = document.getElementById("badge");
+    const viewer = document.querySelector("matterport-viewer");
+    viewer.addEventListener("mpSdkPlaying", async (evt) => {
+      try {
+        const mpSdk = evt.detail.mpSdk;
+        await mpSdk.App.state.waitUntilReady();
+        const info = await mpSdk.Model.getData();
+        badge.textContent = `SDK connected — model: ${info.sid}`;
+        // 🔜 we'll add Security Camera FOV + room-mesh here next
+      } catch (err) {
+        console.error(err);
+        badge.textContent = "SDK init failed (see console)";
       }
-    }
-    customElements.define("ark-mp", ArkMp);
+    });
+    viewer.addEventListener("error", (e) => {
+      console.error("Matterport webcomponent error:", e);
+      badge.textContent = "viewer error (see console)";
+    });
   </script>
 </body>
 </html>
