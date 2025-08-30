@@ -2,53 +2,104 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Ark • Matterport</title>
-
-  <!-- Full-page iframe layout -->
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ark – Security Cam View</title>
   <style>
-    html, body { height: 100%; margin: 0; }
-    #mp-wrap { position: fixed; inset: 0; }
-    #mp-iframe { width: 100%; height: 100%; border: 0; }
-  </style>
+    html,body{height:100%;margin:0;background:#000;}
+    .mp-wrap{position:relative;height:100%;width:100%;overflow:hidden}
+    .mp-wrap iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 
-  <!-- Matterport Showcase SDK (hosted by Matterport) -->
-  <script src="https://static.matterport.com/showcase-sdk/latest.js"></script>
+    /* —— Security-cam overlay —— */
+    .secCam{position:absolute;inset:0;pointer-events:none;color:#fff;mix-blend-mode:normal}
+    .secCam .vignette{position:absolute;inset:0;
+      background:radial-gradient(80% 80% at 50% 50%,
+        rgba(0,0,0,0) 55%, rgba(0,0,0,.35) 78%, rgba(0,0,0,.6) 100%);
+    }
+    .secCam .scan{position:absolute;inset:0;opacity:.18;
+      background:repeating-linear-gradient(
+        to bottom,
+        rgba(255,255,255,.18) 0, rgba(255,255,255,.18) 1px,
+        rgba(0,0,0,0) 1px, rgba(0,0,0,0) 4px);
+      animation:scan 8s linear infinite;
+    }
+    @keyframes scan{from{background-position-y:0} to{background-position-y:200px}}
+
+    .secCam .corners div{position:absolute;width:78px;height:78px;border:3px solid rgba(255,255,255,.6);border-radius:4px;}
+    .secCam .corners .tl{top:12px;left:12px;border-right:0;border-bottom:0}
+    .secCam .corners .tr{top:12px;right:12px;border-left:0;border-bottom:0}
+    .secCam .corners .bl{bottom:12px;left:12px;border-right:0;border-top:0}
+    .secCam .corners .br{bottom:12px;right:12px;border-left:0;border-top:0}
+
+    .secCam .hud{position:absolute;left:12px;right:12px;top:12px;
+      display:flex;align-items:center;justify-content:space-between;
+      font:600 14px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      text-shadow:0 1px 2px rgba(0,0,0,.7);
+    }
+    .secCam .hud .left{display:flex;gap:14px;align-items:center}
+    .secCam .hud .rec{display:flex;gap:6px;align-items:center;letter-spacing:.06em}
+    .secCam .hud .rec i{width:9px;height:9px;border-radius:999px;background:#ff4141;box-shadow:0 0 10px #ff4141}
+    .secCam .hud .rec i{animation:blink 1s steps(1,end) infinite}
+    @keyframes blink{50%{opacity:.2}}
+    .secCam .hud .label{opacity:.85}
+    .secCam .hud .time{opacity:.9}
+    /* Optional status text bottom-left */
+    .secCam .status{position:absolute;left:12px;bottom:12px;opacity:.75;
+      font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  </style>
+  <script defer src="https://static.matterport.com/showcase-sdk/latest.js"></script>
 </head>
 <body>
-  <div id="mp-wrap">
+  <div class="mp-wrap">
+    <!-- Narrowing FOV a bit via query helps the look; remove &fov if you don't want it -->
     <iframe
-      id="mp-iframe"
-      src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1&qs=1&title=0&brand=0"
-      frameborder="0"
-      allow="xr-spatial-tracking; fullscreen; autoplay; accelerometer; gyroscope"
-      allowfullscreen
-    ></iframe>
+      id="showcase"
+      src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=0&fov=60"
+      allow="xr-spatial-tracking; fullscreen; autoplay; clipboard-write"
+      allowfullscreen>
+    </iframe>
+
+    <!-- Security-camera overlay -->
+    <div class="secCam" aria-hidden="true">
+      <div class="vignette"></div>
+      <div class="scan"></div>
+      <div class="corners">
+        <div class="tl"></div><div class="tr"></div><div class="bl"></div><div class="br"></div>
+      </div>
+      <div class="hud">
+        <div class="left">
+          <span class="label">CAM 01 • LOBBY</span>
+          <span class="rec"><i></i>REC</span>
+        </div>
+        <span id="osd-time" class="time"></span>
+      </div>
+      <div class="status">FOV: 60°   ISO: 800   WB: 4300K</div>
+    </div>
   </div>
 
   <script>
-    // Connect to the SDK
+    // Live timestamp for the HUD
+    const osd = document.getElementById('osd-time');
+    function tick(){
+      const d = new Date();
+      osd.textContent = d.toLocaleString([], {
+        year:'2-digit', month:'2-digit', day:'2-digit',
+        hour:'2-digit', minute:'2-digit', second:'2-digit',
+        hour12:false
+      });
+    }
+    tick(); setInterval(tick, 1000);
+
+    // Optional: also ask the SDK to narrow FOV (gracefully ignored if not supported)
     (async () => {
       try {
-        const iframe = document.getElementById('mp-iframe');
-        const sdk = await MP_SDK.connect(iframe, 'akqd0dp3hr9wz4eu70zd1rsab', 'latest');
-
-        // Example: confirm connection and log the model SID
-        const model = await sdk.Model.getData();
-        console.log('Connected to model:', model.sid);
-
-        // Example: listen for camera pose updates
-        const unsub = sdk.Camera.pose.subscribe((pose) => {
-          // console.log('pose', pose.position, pose.rotation);
-        });
-
-        // Example: programmatically go fullscreen
-        // await sdk.App.goFullscreen();
-      } catch (err) {
-        console.error('MP_SDK.connect failed:', err);
-        // Most common cause: your domain isn’t allowed for the SDK key.
-        // Make sure "rhettswanson.github.io" (and localhost if needed) is on the allowlist.
-      }
+        const iframe = document.getElementById('showcase');
+        const sdk = await window.MP_SDK.connect(iframe, 'akqd0dp3hr9wz4eu70zd1rsab', '3.8');
+        // Try to clamp vertical FOV ~60° (some builds expose Camera APIs; if not, the try/catch protects us)
+        if (sdk.Camera && typeof sdk.Camera.setVerticalFov === 'function') {
+          await sdk.Camera.setVerticalFov(60 * Math.PI / 180);
+        }
+        // You can also dim/grade the scene via rendering options if desired.
+      } catch (e) { /* no-op */ }
     })();
   </script>
 </body>
