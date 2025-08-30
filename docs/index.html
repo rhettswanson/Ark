@@ -1,27 +1,99 @@
 <!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Ark – Security Camera FOV</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ark – Camera Barebones</title>
+  <style>
+    :root { color-scheme: dark; }
+    html,body { height:100%; margin:0; background:#111; color:#eee; }
+    /* MOST IMPORTANT: give the host element real size */
+    ark-cam-demo { display:block; inline-size:100%; block-size:100dvh; }
+  </style>
+</head>
+<body>
+  <ark-cam-demo></ark-cam-demo>
 
-    <!-- built file paths are relative to /Ark/docs/ -->
-    <link rel="stylesheet" href="./assets/index-DuKT3xuU.css" />
+  <script type="module">
+    import * as THREE from "https://unpkg.com/three@0.164.1/build/three.module.js";
+    import { OrbitControls } from "https://unpkg.com/three@0.164.1/examples/jsm/controls/OrbitControls.js";
 
-    <style>
-      html, body { height: 100%; margin: 0; }
-      matterport-viewer { position: fixed; inset: 0; border: 0; display: block; }
-    </style>
-  </head>
-  <body>
-    <!-- Web component (no iframe). Your main.ts listens for mpSdkPlaying -->
-    <matterport-viewer
-      id="mp-viewer"
-      model-id="1ghABoaBFPZ"
-      application-key="akqd0dp3hr9wz4eu70zd1rsab">
-    </matterport-viewer>
+    class ArkCamDemo extends HTMLElement {
+      constructor(){
+        super();
+        this.attachShadow({ mode:"open" });
+      }
+      connectedCallback(){
+        // root container inside shadow DOM
+        const root = document.createElement("div");
+        root.style.cssText = "position:relative;width:100%;height:100%;";
+        const status = document.createElement("div");
+        status.style.cssText = "position:absolute;left:8px;bottom:8px;font:12px system-ui;opacity:.7";
+        status.textContent = "init…";
+        this.shadowRoot.append(root, status);
 
-    <!-- IMPORTANT: exact casing; capital “I” in SeaI -->
-    <script type="module" crossorigin src="./assets/index-DvSeaI55.js"></script>
-  </body>
+        // renderer
+        const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false });
+        renderer.setClearColor(0x151515, 1);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        root.appendChild(renderer.domElement);
+
+        // scene/camera
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 500);
+        camera.position.set(4,3,6);
+
+        // controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0,1,0);
+        controls.update();
+
+        // helpers + a visible object so we never see “pure black”
+        scene.add(new THREE.GridHelper(20, 20, 0x444444, 0x222222));
+        scene.add(new THREE.AxesHelper(2));
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+        dir.position.set(3,5,2);
+        scene.add(dir);
+
+        const box = new THREE.Mesh(
+          new THREE.BoxGeometry(1,1,1),
+          new THREE.MeshStandardMaterial({ color:0xff6a00, metalness:0.1, roughness:0.5 })
+        );
+        box.position.y = 0.5;
+        scene.add(box);
+
+        // sizing
+        const resize = () => {
+          const w = root.clientWidth || this.clientWidth || window.innerWidth;
+          const h = root.clientHeight || this.clientHeight || window.innerHeight;
+          renderer.setSize(w, h, false);
+          camera.aspect = w / h;
+          camera.updateProjectionMatrix();
+          status.textContent = `size ${w}×${h}`;
+        };
+        resize();
+        new ResizeObserver(resize).observe(root);
+
+        // render loop
+        let raf;
+        const loop = () => {
+          box.rotation.y += 0.01;
+          renderer.render(scene, camera);
+          raf = requestAnimationFrame(loop);
+        };
+        raf = requestAnimationFrame(loop);
+
+        // cleanup + context loss guard
+        this._cleanup = () => { cancelAnimationFrame(raf); renderer.dispose(); };
+        renderer.domElement.addEventListener("webglcontextlost", e => {
+          e.preventDefault();
+          status.textContent = "WebGL context lost";
+        });
+      }
+      disconnectedCallback(){ this._cleanup?.(); }
+    }
+    customElements.define("ark-cam-demo", ArkCamDemo);
+  </script>
+</body>
 </html>
