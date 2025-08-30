@@ -3,157 +3,29 @@
   <head>
     <meta charset="utf-8" />
     <title>Ark – Security Camera FOV</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
-      html,body { height: 100%; margin: 0; }
-      #wrap   { height: 100%; display: grid; }
-      #mp     { width: 100%; height: 100%; border: 0; }
+      html, body { height: 100%; margin: 0; }
+      matterport-viewer {
+        display: block;
+        position: fixed;
+        inset: 0;
+        border: 0;
+      }
     </style>
+
+    <!-- Vite build outputs (paths are relative to /Ark/docs/) -->
+    <link rel="stylesheet" href="./assets/index-DuKT3xuU.css" />
   </head>
+
   <body>
-    <!-- Your space via iframe -->
-    <div id="wrap">
-      <iframe
-        id="mp"
-        allow="fullscreen; xr-spatial-tracking"
-        allowfullscreen
-        src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1&qs=1&title=0&brand=0">
-      </iframe>
-    </div>
+    <!-- Web component version (no iframe; your main.ts listens for mpSdkPlaying) -->
+    <matterport-viewer
+      id="mp-viewer"
+      model-id="1ghABoaBFPZ"
+      application-key="akqd0dp3hr9wz4eu70zd1rsab">
+    </matterport-viewer>
 
-    <!-- Security camera overlay -->
-    <script type="module">
-      const SDK_KEY = "akqd0dp3hr9wz4eu70zd1rsab";
-      const iframe  = document.getElementById("mp");
-
-      iframe.addEventListener("load", async () => {
-        const sdk = await window.MP_SDK.connect(iframe, SDK_KEY, "");
-        console.log("SDK connected!");
-
-        // Register a simple SceneComponent inside Showcase
-        sdk.Scene.register("mp.securityCamera", () => {
-          return class SecurityCamera extends sdk.Scene.Component {
-            inputs = {
-              nearPlane: 0.3,
-              farPlane: 12,
-              horizontalFOV: 90,   // degrees (horizontal)
-              aspect: 16/9,        // width/height
-              localPosition: { x: 0, y: 2.6, z: 0 },
-              localRotation: { x: 0, y: 0, z: 0 }, // radians
-              color: 0x76e17f,
-              panEnabled: true,
-              panAngleDeg: 90,
-              panPeriodSec: 8
-            };
-
-            onInit() {
-              const T = this.context.three;
-
-              this._t = 0;
-              this.group = new T.Group();      // world pose
-              this.yaw   = new T.Group();      // swivel (left/right)
-              this.pitch = new T.Group();      // keep if you want tilt later
-              this.group.add(this.yaw);
-              this.yaw.add(this.pitch);
-
-              this._buildFrustum();
-              this.outputs.objectRoot = this.group;
-              this._applyTransform();
-            }
-
-            onInputsUpdated() {
-              this._applyTransform();
-              this._rebuildFrustum();
-            }
-
-            onTick(dt) {
-              if (!this.inputs.panEnabled) return;
-              this._t += dt;
-              const angle = (this.inputs.panAngleDeg || 60) * Math.PI / 180;
-              const period = Math.max(0.001, this.inputs.panPeriodSec || 8);
-              // sweep left/right like a PTZ
-              this.yaw.rotation.y = Math.sin(this._t * (2 * Math.PI / period)) * (angle / 2);
-            }
-
-            _applyTransform() {
-              const p = this.inputs.localPosition;
-              const r = this.inputs.localRotation;
-              this.group.position.set(p.x, p.y, p.z);
-              this.group.rotation.set(r.x, r.y, r.z);
-            }
-
-            _rebuildFrustum() {
-              const T = this.context.three;
-              if (this.mesh) {
-                this.mesh.geometry.dispose();
-                this.mesh.parent && this.mesh.parent.remove(this.mesh);
-              }
-              this._buildFrustum();
-            }
-
-            _buildFrustum() {
-              const T = this.context.three;
-              const hFov = (this.inputs.horizontalFOV || 90) * Math.PI / 180;
-              const aspect = this.inputs.aspect || 16/9;
-              const near = Math.max(0.01, this.inputs.nearPlane || 0.3);
-              const far  = Math.max(near + 0.01, this.inputs.farPlane || 12);
-              const nearR = Math.tan(hFov / 2) * near;
-              const farR  = Math.tan(hFov / 2) * far;
-
-              // Hollow frustum (like a stretched cone), pointing +Z
-              const geom = new T.CylinderGeometry(nearR, farR, far - near, 48, 1, true);
-              geom.translate(0, (far - near) / 2, 0);
-              geom.rotateX(Math.PI / 2);
-
-              const mat = new T.MeshBasicMaterial({
-                color: this.inputs.color ?? 0x66ff99,
-                transparent: true,
-                opacity: 0.35,
-                depthWrite: false
-              });
-              const frustum = new T.Mesh(geom, mat);
-              frustum.scale.x = aspect;      // widen for aspect ratio
-              this.mesh = frustum;
-
-              // footprint arc on the ground for a nice “wedge” look
-              const arc = new T.RingGeometry(
-                farR * 0.98, farR * 1.02, 64, 1,
-                Math.PI / 2 - hFov / 2, hFov
-              );
-              arc.rotateX(-Math.PI / 2);
-              const arcMat = new T.MeshBasicMaterial({
-                color: this.inputs.color ?? 0x66ff99,
-                transparent: true,
-                opacity: 0.5,
-                side: T.DoubleSide
-              });
-              const footprint = new T.Mesh(arc, arcMat);
-              footprint.position.z = far;
-              frustum.add(footprint);
-
-              this.pitch.add(frustum);
-            }
-          };
-        });
-
-        // Drop a camera instance (tweak numbers as you like)
-        const node = sdk.Scene.createNode();
-        node.addComponent("mp.securityCamera", {
-          nearPlane: 0.4,
-          farPlane: 14,
-          horizontalFOV: 95,
-          aspect: 16/9,
-          localPosition: { x: 2.0, y: 2.8, z: -1.0 },
-          localRotation: { x: 0, y: Math.PI * 0.60, z: 0 },
-          color: 0x73e0a3,
-          panEnabled: true,
-          panAngleDeg: 120,
-          panPeriodSec: 12
-        });
-        node.start();
-
-        console.log("Security camera registered & started.");
-      });
-    </script>
+    <script type="module" crossorigin src="./assets/index-DvSeaI55.js"></script>
   </body>
 </html>
