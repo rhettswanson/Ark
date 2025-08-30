@@ -3,83 +3,72 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ark – Camera Barebones</title>
+  <title>Ark – Matterport Viewer</title>
   <style>
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
-    /* give the host element *real size* */
-    ark-cam-demo { display:block; inline-size:100%; block-size:100dvh; }
-  </style>
-
-  <!-- Import map: tells the browser what "three" means -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.164.1/build/three.module.js",
-      "three/examples/jsm/": "https://unpkg.com/three@0.164.1/examples/jsm/"
+    ark-mp { display:block; inline-size:100%; block-size:100dvh; }
+    .badge {
+      position: absolute; left: 10px; top: 10px;
+      padding: 6px 10px; font: 12px/1.2 system-ui;
+      background: rgba(0,0,0,.55); border:1px solid #333; border-radius: 8px;
     }
-  }
-  </script>
+  </style>
 </head>
 <body>
-  <ark-cam-demo></ark-cam-demo>
+  <ark-mp></ark-mp>
 
   <script type="module">
-    import * as THREE from "three";
-    import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+    // Load the Matterport web component (ESM) and pin a compatible THREE version
+    import "https://esm.sh/@matterport/webcomponent@0.1.45?deps=three@0.176.0";
 
-    class ArkCamDemo extends HTMLElement {
-      constructor(){ super(); this.attachShadow({mode:"open"}); }
+    // Your IDs
+    const MODEL = "1ghABoaBFPZ";
+    const KEY   = "akqd0dp3hr9wz4eu70zd1rsab";
+
+    class ArkMp extends HTMLElement {
+      constructor(){ super(); this.attachShadow({ mode: "open" }); }
       connectedCallback(){
-        const root = document.createElement("div");
-        root.style.cssText = "position:relative;width:100%;height:100%;";
-        const status = document.createElement("div");
-        status.style.cssText = "position:absolute;left:8px;bottom:8px;font:12px system-ui;opacity:.7";
-        status.textContent = "init…";
-        this.shadowRoot.append(root, status);
+        const host  = document.createElement("div");
+        host.style.cssText = "position:relative;width:100%;height:100%;";
+        const badge = document.createElement("div");
+        badge.className = "badge";
+        badge.textContent = "loading…";
+        this.shadowRoot.append(host, badge);
 
-        const renderer = new THREE.WebGLRenderer({ antialias:true });
-        renderer.setClearColor(0x151515, 1);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        root.appendChild(renderer.domElement);
-
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 500);
-        camera.position.set(4,3,6);
-
-        const controls = new OrbitControls(camera, renderer.domElement);
-        controls.target.set(0,1,0); controls.update();
-
-        scene.add(new THREE.GridHelper(20,20,0x444444,0x222222));
-        scene.add(new THREE.AxesHelper(2));
-        scene.add(new THREE.AmbientLight(0xffffff,0.6));
-        const dir = new THREE.DirectionalLight(0xffffff,0.8);
-        dir.position.set(3,5,2); scene.add(dir);
-
-        const box = new THREE.Mesh(
-          new THREE.BoxGeometry(1,1,1),
-          new THREE.MeshStandardMaterial({ color:0xff6a00, metalness:0.1, roughness:0.5 })
+        // Use src= so we don't need to host Matterport assets on GitHub Pages
+        const mp = document.createElement("matterport-viewer");
+        mp.style.cssText = "display:block;width:100%;height:100%;";
+        mp.setAttribute(
+          "src",
+          `https://my.matterport.com/show/?m=${MODEL}&applicationKey=${KEY}&qs=1&brand=0&title=0&play=1`
         );
-        box.position.y = 0.5; scene.add(box);
+        host.appendChild(mp);
 
-        const resize = () => {
-          const w = root.clientWidth || this.clientWidth || window.innerWidth;
-          const h = root.clientHeight || this.clientHeight || window.innerHeight;
-          renderer.setSize(w, h, false);
-          camera.aspect = w / h; camera.updateProjectionMatrix();
-          status.textContent = `size ${w}×${h}`;
-        };
-        resize(); new ResizeObserver(resize).observe(root);
+        mp.addEventListener("error", (e) => {
+          console.error("Matterport webcomponent error:", e);
+          badge.textContent = "viewer error (see console)";
+        });
 
-        let raf;
-        const loop = () => { box.rotation.y += 0.01; renderer.render(scene,camera); raf = requestAnimationFrame(loop); };
-        raf = requestAnimationFrame(loop);
-        this._cleanup = () => { cancelAnimationFrame(raf); renderer.dispose(); };
-        renderer.domElement.addEventListener("webglcontextlost", e => { e.preventDefault(); status.textContent = "WebGL context lost"; });
+        // When the SDK is available:
+        mp.addEventListener("mpSdkPlaying", async (evt) => {
+          try {
+            const mpSdk = evt.detail.mpSdk;
+            await mpSdk.App.state.waitUntilReady();
+            const info = await mpSdk.Model.getData();
+            badge.textContent = `SDK connected — model: ${info.sid}`;
+            // ✅ Place to wire Security Camera FOV + room-mesh logic next
+            // e.g.:
+            // const pose = await mpSdk.Camera.getPose();
+            // console.log("pose", pose);
+          } catch (err) {
+            console.error(err);
+            badge.textContent = "SDK init failed (see console)";
+          }
+        });
       }
-      disconnectedCallback(){ this._cleanup?.(); }
     }
-    customElements.define("ark-cam-demo", ArkCamDemo);
+    customElements.define("ark-mp", ArkMp);
   </script>
 </body>
 </html>
