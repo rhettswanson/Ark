@@ -3,227 +3,129 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ark – Matterport (IFRAME SDK)</title>
+  <title>Ark – Security Camera FOV</title>
   <style>
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
-    #wrap { position:fixed; inset:0; }
-    #showcase { width:100%; height:100%; border:0; display:block; }
+    #wrap { height:100%; display:grid; }
+    #mp   { width:100%; height:100%; border:0; }
     .badge { position:absolute; left:10px; top:10px; z-index:5;
       padding:6px 10px; font:12px system-ui;
       background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px; }
   </style>
 </head>
 <body>
+  <div class="badge" id="badge">loading…</div>
+
+  <!-- your space via iframe -->
   <div id="wrap">
-    <div class="badge" id="badge">loading…</div>
     <iframe
-      id="showcase"
+      id="mp"
       allow="xr-spatial-tracking; fullscreen"
-      src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1&qs=1&brand=0&title=0"
-    ></iframe>
+      allowfullscreen
+      src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1&qs=1&title=0&brand=0">
+    </iframe>
   </div>
 
-  <!-- Pin a stable SDK release -->
+  <!-- 1) load the iframe SDK -->
   <script src="https://static.matterport.com/showcase-sdk/releases/3.2.1/sdk.js"></script>
+
+  <!-- 2) your overlay code -->
   <script>
   (async () => {
-    const badge = document.getElementById('badge');
-    const iframe = document.getElementById('showcase');
+    const SDK_KEY = "akqd0dp3hr9wz4eu70zd1rsab";
+    const iframe  = document.getElementById("mp");
+    const badge   = document.getElementById("badge");
 
-    try {
-      // Connect to Showcase
-      const sdk = await window.MP_SDK.connect(
-        iframe,
-        "akqd0dp3hr9wz4eu70zd1rsab", // your SDK key
-        "3.2"                        // SDK interface version
-      );
+    iframe.addEventListener("load", async () => {
+      try {
+        const sdk = await window.MP_SDK.connect(iframe, SDK_KEY, "3.2");
 
-      // Sanity + banner
-      const info = await sdk.Model.getData();
-      badge.textContent = `SDK connected — model: ${info.sid}`;
-      console.log("pose", await sdk.Camera.getPose());
+        const info = await sdk.Model.getData();
+        badge.textContent = `SDK connected — model: ${info.sid}`;
+        console.log("pose", await sdk.Camera.getPose());
 
-      // ---------- SecurityCam component (with schema) ----------
-      sdk.Scene.register("ark.securityCam", () => {
-        return class SecurityCam extends sdk.Scene.Component {
-          static schema = {
-            inputs: {
-              near:              { type: "number",  default: 0.30 },
-              far:               { type: "number",  default: 12.0 },
-              hfovDeg:           { type: "number",  default: 90 },
-              aspect:            { type: "number",  default: 16/9 },
-              color:             { type: "number",  default: 0x00ff88 },
-              opacity:           { type: "number",  default: 0.15 },
-              wireOpacity:       { type: "number",  default: 0.55 },
-              worldPosition:     { type: "vec3",    default: { x: 0, y: 2.6, z: 0 } },
-              worldRotationQuat: { type: "quat",    default: { x:0, y:0, z:0, w:1 } },
-              worldEulerDeg:     { type: "vec3",    default: { x: 0, y: 0, z: 0 } },
-              panEnabled:        { type: "boolean", default: false },
-              panAngleDeg:       { type: "number",  default: 60 },
-              panPeriodSec:      { type: "number",  default: 8 }
+        // --- Security camera component (schema + graph API) ---
+        sdk.Scene.register("ark.securityCam", () => {
+          return class SecurityCam extends sdk.Scene.Component {
+            static schema = {
+              inputs: {
+                near:              { type: "number",  default: 0.30 },
+                far:               { type: "number",  default: 12.0 },
+                hfovDeg:           { type: "number",  default: 90 },
+                aspect:            { type: "number",  default: 16/9 },
+                color:             { type: "number",  default: 0x00aaff },
+                opacity:           { type: "number",  default: 0.18 },
+                wireOpacity:       { type: "number",  default: 0.60 },
+                worldPosition:     { type: "vec3",    default: { x:0, y:2.6, z:0 } },
+                worldRotationQuat: { type: "quat",    default: { x:0, y:0, z:0, w:1 } },
+                worldEulerDeg:     { type: "vec3",    default: { x:0, y:0, z:0 } },
+                panEnabled:        { type: "boolean", default: false },
+                panAngleDeg:       { type: "number",  default: 60 },
+                panPeriodSec:      { type: "number",  default: 8 }
+              }
+            };
+            _get(n){const i=this.inputs; if(i?.get) return i.get(n); if(n in i) return i[n]; return this.constructor.schema.inputs[n]?.default;}
+
+            onInit(){
+              const T = this.context.three;
+              this.root=new T.Group(); this.yaw=new T.Group(); this.pitch=new T.Group();
+              this.root.add(this.yaw); this.yaw.add(this.pitch);
+              this.material=new T.MeshBasicMaterial({color:this._get("color"),transparent:true,opacity:this._get("opacity"),depthWrite:false,side:T.DoubleSide});
+              this.lineMat=new T.LineBasicMaterial({color:this._get("color"),transparent:true,opacity:this._get("wireOpacity")});
+              this._buildFrustum(); this._applyTransform(); this.outputs.objectRoot=this.root; this._t=0;
             }
+            _buildFrustum(){
+              const T=this.context.three, n=this._get("near"), f=this._get("far");
+              const hf=T.MathUtils.degToRad(this._get("hfovDeg")), a=this._get("aspect");
+              const vf=2*Math.atan(Math.tan(hf/2)/a);
+              const nw=Math.tan(hf/2)*n, nh=Math.tan(vf/2)*n, fw=Math.tan(hf/2)*f, fh=Math.tan(vf/2)*f;
+              const V=[[-nw,nh,-n],[nw,nh,-n],[nw,-nh,-n],[-nw,-nh,-n],[-fw,fh,-f],[fw,fh,-f],[fw,-fh,-f],[-fw,-fh,-f]];
+              const idx=[0,1,2,0,2,3,4,6,5,4,7,6,0,4,5,0,5,1,1,5,6,1,6,2,2,6,7,2,7,3,3,7,4,3,4,0];
+              const pos=new Float32Array(idx.length*3);
+              for(let i=0;i<idx.length;i++){const p=V[idx[i]]; pos[i*3]=p[0]; pos[i*3+1]=p[1]; pos[i*3+2]=p[2];}
+              const g=new T.BufferGeometry(); g.setAttribute("position",new T.BufferAttribute(pos,3));
+              const ep=[0,1,1,2,2,3,3,0,4,5,5,6,6,7,7,4,0,4,1,5,2,6,3,7], epos=new Float32Array(ep.length*3);
+              for(let i=0;i<ep.length;i++){const p=V[ep[i]]; epos[i*3]=p[0]; epos[i*3+1]=p[1]; epos[i*3+2]=p[2];}
+              const eg=new T.BufferGeometry(); eg.setAttribute("position",new T.BufferAttribute(epos,3));
+              if(!this.mesh){ this.mesh=new T.Mesh(g,this.material); this.wire=new T.LineSegments(eg,this.lineMat); this.pitch.add(this.mesh,this.wire);}
+              else { this.mesh.geometry?.dispose(); this.wire.geometry?.dispose(); this.mesh.geometry=g; this.wire.geometry=eg; }
+            }
+            _applyTransform(){
+              const T=this.context.three, wp=this._get("worldPosition"), q=this._get("worldRotationQuat"), e=this._get("worldEulerDeg");
+              this.root.position.set(wp.x,wp.y,wp.z);
+              if(q&&"w" in q) this.root.quaternion.set(q.x,q.y,q.z,q.w);
+              else this.root.rotation.set(T.MathUtils.degToRad(e.x||0),T.MathUtils.degToRad(e.y||0),T.MathUtils.degToRad(e.z||0),"YXZ");
+              this.yaw.rotation.set(0,0,0); this.pitch.rotation.set(0,0,0);
+            }
+            onInputsChanged(){ this._buildFrustum(); this._applyTransform(); }
+            onTick(dt){ if(!this._get("panEnabled")) return; const T=this.context.three; this._t+=dt;
+              const amp=T.MathUtils.degToRad(this._get("panAngleDeg")||60), w=(2*Math.PI)/(this._get("panPeriodSec")||8);
+              this.yaw.rotation.y=Math.sin(this._t*w)*amp; }
           };
+        });
 
-          _get(name) {
-            const i = this.inputs;
-            if (i?.get) return i.get(name);
-            if (i && name in i) return i[name];
-            const s = this.constructor.schema?.inputs?.[name];
-            return s?.default;
-          }
+        async function addCamAtViewer(hfov=90){
+          const pose = await sdk.Camera.getPose();
+          const node = await sdk.Scene.createNode();
+          const comp = node.addComponent("ark.securityCam");
+          const inputs = {
+            worldPosition: pose.position, worldRotationQuat: pose.rotation,
+            hfovDeg: hfov, aspect: 16/9, near: 0.3, far: 12,
+            color: 0x00aaff, opacity: 0.18, wireOpacity: 0.6, panEnabled: false
+          };
+          if (comp.inputs?.set) comp.inputs.set(inputs); else Object.assign(comp.inputs, inputs);
+          await node.start(); console.log("security cam added", node); return node;
+        }
 
-          onInit() {
-            const T = this.context.three;
+        await addCamAtViewer(90);
+        window.addCamAtViewer = addCamAtViewer;
 
-            this.root  = new T.Group();
-            this.yaw   = new T.Group();
-            this.pitch = new T.Group();
-            this.root.add(this.yaw);
-            this.yaw.add(this.pitch);
-
-            this.material = new T.MeshBasicMaterial({
-              color: this._get("color"),
-              transparent: true,
-              opacity: this._get("opacity"),
-              depthWrite: false,
-              side: T.DoubleSide
-            });
-            this.lineMat = new T.LineBasicMaterial({
-              color: this._get("color"),
-              transparent: true,
-              opacity: this._get("wireOpacity")
-            });
-
-            this._buildFrustum();
-            this._applyTransform();
-
-            this.outputs.objectRoot = this.root;
-            this._t = 0;
-          }
-
-          _buildFrustum() {
-            const T = this.context.three;
-            const n  = this._get("near");
-            const f  = this._get("far");
-            const hf = T.MathUtils.degToRad(this._get("hfovDeg"));
-            const a  = this._get("aspect");
-            const vf = 2 * Math.atan(Math.tan(hf/2) / a);
-
-            const nw = Math.tan(hf/2) * n, nh = Math.tan(vf/2) * n;
-            const fw = Math.tan(hf/2) * f, fh = Math.tan(vf/2) * f;
-
-            const V = [
-              [-nw,  nh, -n], [ nw,  nh, -n], [ nw, -nh, -n], [-nw, -nh, -n],
-              [-fw,  fh, -f], [ fw,  fh, -f], [ fw, -fh, -f], [-fw, -fh, -f],
-            ];
-            const idx = [
-              0,1,2, 0,2,3,  4,6,5, 4,7,6,
-              0,4,5, 0,5,1,  1,5,6, 1,6,2,
-              2,6,7, 2,7,3,  3,7,4, 3,4,0,
-            ];
-
-            const pos = new Float32Array(idx.length * 3);
-            for (let i=0;i<idx.length;i++){
-              const p = V[idx[i]];
-              pos[i*3+0]=p[0]; pos[i*3+1]=p[1]; pos[i*3+2]=p[2];
-            }
-            const g = new T.BufferGeometry();
-            g.setAttribute("position", new T.BufferAttribute(pos, 3));
-
-            const edgePairs = [0,1,1,2,2,3,3,0, 4,5,5,6,6,7,7,4, 0,4,1,5,2,6,3,7];
-            const epos = new Float32Array(edgePairs.length * 3);
-            for (let i=0;i<edgePairs.length;i++){
-              const p = V[edgePairs[i]];
-              epos[i*3+0]=p[0]; epos[i*3+1]=p[1]; epos[i*3+2]=p[2];
-            }
-            const eg = new T.BufferGeometry();
-            eg.setAttribute("position", new T.BufferAttribute(epos, 3));
-
-            if (!this.mesh) {
-              this.mesh = new T.Mesh(g, this.material);
-              this.wire = new T.LineSegments(eg, this.lineMat);
-              this.pitch.add(this.mesh, this.wire);
-            } else {
-              this.mesh.geometry?.dispose();
-              this.wire.geometry?.dispose();
-              this.mesh.geometry = g;
-              this.wire.geometry = eg;
-            }
-          }
-
-          _applyTransform() {
-            const T = this.context.three;
-            const wp = this._get("worldPosition");
-            const q  = this._get("worldRotationQuat");
-            const e  = this._get("worldEulerDeg");
-
-            this.root.position.set(wp.x, wp.y, wp.z);
-
-            if (q && typeof q === "object" && "w" in q) {
-              this.root.quaternion.set(q.x, q.y, q.z, q.w);
-            } else {
-              this.root.rotation.set(
-                T.MathUtils.degToRad(e.x || 0),
-                T.MathUtils.degToRad(e.y || 0),
-                T.MathUtils.degToRad(e.z || 0),
-                "YXZ"
-              );
-            }
-            this.yaw.rotation.set(0,0,0);
-            this.pitch.rotation.set(0,0,0);
-          }
-
-          onInputsChanged() {
-            this._buildFrustum();
-            this._applyTransform();
-          }
-
-          onTick(dt) {
-            if (!this._get("panEnabled")) return;
-            const T = this.context.three;
-            this._t += dt;
-            const amp = T.MathUtils.degToRad(this._get("panAngleDeg") || 60);
-            const omega = (2*Math.PI)/(this._get("panPeriodSec") || 8);
-            this.yaw.rotation.y = Math.sin(this._t * omega) * amp;
-          }
-        };
-      });
-
-      // Add one frustum at current viewer pose
-      async function addCamAtViewer(hfov = 90) {
-        const pose = await sdk.Camera.getPose();
-        const node = await sdk.Scene.createNode();
-        const comp = node.addComponent("ark.securityCam");
-
-        const inputs = {
-          worldPosition: pose.position,
-          worldRotationQuat: pose.rotation,
-          hfovDeg: hfov,
-          aspect: 16/9,
-          near: 0.3,
-          far: 12,
-          color: 0x00aaff,
-          opacity: 0.18,
-          wireOpacity: 0.6,
-          panEnabled: false
-        };
-
-        if (comp.inputs?.set) comp.inputs.set(inputs);
-        else Object.assign(comp.inputs, inputs);
-
-        await node.start();
-        console.log("security cam added", node);
-        return comp || node;
+      } catch(e) {
+        console.error(e);
+        badge.textContent = "SDK init failed (see console)";
       }
-
-      await addCamAtViewer(90);
-      window.addCamAtViewer = addCamAtViewer;
-
-    } catch (err) {
-      console.error(err);
-      badge.textContent = "SDK init failed (see console)";
-    }
+    });
   })();
   </script>
 </body>
