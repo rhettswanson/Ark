@@ -4109,7 +4109,7 @@ Obtain an SDK key (see https://matterport.github.io/showcase-sdk/sdkbundle_home.
     import * as three from "./vendors/three/0.176.0/three.module.min.js";
     window.THREE = { ...three };
   <\/script>
-  <script defer src="js/showcase.ed41b083661e87b57b47.js"><\/script><link href="css/showcase.css" rel="stylesheet">
+  <script defer src="assets/js/showcase.ed41b083661e87b57b47.js"><\/script><link href="assets/css/showcase.css" rel="stylesheet">
 </head>
 
 <body class='showcase'>
