@@ -27,32 +27,30 @@
   ></matterport-viewer>
 
   <script type="module">
-  import "https://esm.sh/@matterport/webcomponent@0.1.45?deps=three@0.176.0";
+    import "https://esm.sh/@matterport/webcomponent@0.1.45?deps=three@0.176.0";
 
-  const badge  = document.getElementById("badge");
-  const viewer = document.querySelector("matterport-viewer");
+    const badge  = document.getElementById("badge");
+    const viewer = document.querySelector("matterport-viewer");
 
-  viewer.addEventListener("mpSdkPlaying", async (evt) => {
-    try {
-      const mpSdk = evt.detail.mpSdk;
+    // ✅ mpSdkPlaying means SDK is ready for calls. No extra waiting.
+    viewer.addEventListener("mpSdkPlaying", async (evt) => {
+      try {
+        const mpSdk = evt.detail.mpSdk;
+        const info  = await mpSdk.Model.getData();
+        badge.textContent = `SDK connected — model: ${info.sid}`;
+        // sanity ping
+        const pose = await mpSdk.Camera.getPose();
+        console.log("pose", pose);
+      } catch (err) {
+        console.error(err);
+        badge.textContent = "SDK init failed (see console)";
+      }
+    });
 
-      // No waiting needed—mpSdkPlaying fires when Showcase is playing.
-      const info = await mpSdk.Model.getData();
-      badge.textContent = `SDK connected — model: ${info.sid}`;
-
-      // sanity ping
-      const pose = await mpSdk.Camera.getPose();
-      console.log("pose", pose);
-    } catch (err) {
-      console.error(err);
-      badge.textContent = "SDK init failed (see console)";
-    }
-  });
-
-  viewer.addEventListener("error", (e) => {
-    console.error("Matterport webcomponent error:", e);
-    badge.textContent = "viewer error (see console)";
-  });
-</script>
+    viewer.addEventListener("error", (e) => {
+      console.error("Matterport webcomponent error:", e);
+      badge.textContent = "viewer error (see console)";
+    });
+  </script>
 </body>
 </html>
