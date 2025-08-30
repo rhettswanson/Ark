@@ -1,106 +1,159 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ark – Security Cam View</title>
-  <style>
-    html,body{height:100%;margin:0;background:#000;}
-    .mp-wrap{position:relative;height:100%;width:100%;overflow:hidden}
-    .mp-wrap iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
-
-    /* —— Security-cam overlay —— */
-    .secCam{position:absolute;inset:0;pointer-events:none;color:#fff;mix-blend-mode:normal}
-    .secCam .vignette{position:absolute;inset:0;
-      background:radial-gradient(80% 80% at 50% 50%,
-        rgba(0,0,0,0) 55%, rgba(0,0,0,.35) 78%, rgba(0,0,0,.6) 100%);
-    }
-    .secCam .scan{position:absolute;inset:0;opacity:.18;
-      background:repeating-linear-gradient(
-        to bottom,
-        rgba(255,255,255,.18) 0, rgba(255,255,255,.18) 1px,
-        rgba(0,0,0,0) 1px, rgba(0,0,0,0) 4px);
-      animation:scan 8s linear infinite;
-    }
-    @keyframes scan{from{background-position-y:0} to{background-position-y:200px}}
-
-    .secCam .corners div{position:absolute;width:78px;height:78px;border:3px solid rgba(255,255,255,.6);border-radius:4px;}
-    .secCam .corners .tl{top:12px;left:12px;border-right:0;border-bottom:0}
-    .secCam .corners .tr{top:12px;right:12px;border-left:0;border-bottom:0}
-    .secCam .corners .bl{bottom:12px;left:12px;border-right:0;border-top:0}
-    .secCam .corners .br{bottom:12px;right:12px;border-left:0;border-top:0}
-
-    .secCam .hud{position:absolute;left:12px;right:12px;top:12px;
-      display:flex;align-items:center;justify-content:space-between;
-      font:600 14px/1.2 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-      text-shadow:0 1px 2px rgba(0,0,0,.7);
-    }
-    .secCam .hud .left{display:flex;gap:14px;align-items:center}
-    .secCam .hud .rec{display:flex;gap:6px;align-items:center;letter-spacing:.06em}
-    .secCam .hud .rec i{width:9px;height:9px;border-radius:999px;background:#ff4141;box-shadow:0 0 10px #ff4141}
-    .secCam .hud .rec i{animation:blink 1s steps(1,end) infinite}
-    @keyframes blink{50%{opacity:.2}}
-    .secCam .hud .label{opacity:.85}
-    .secCam .hud .time{opacity:.9}
-    /* Optional status text bottom-left */
-    .secCam .status{position:absolute;left:12px;bottom:12px;opacity:.75;
-      font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-  </style>
-  <script defer src="https://static.matterport.com/showcase-sdk/latest.js"></script>
-</head>
-<body>
-  <div class="mp-wrap">
-    <!-- Narrowing FOV a bit via query helps the look; remove &fov if you don't want it -->
-    <iframe
-      id="showcase"
-      src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=0&fov=60"
-      allow="xr-spatial-tracking; fullscreen; autoplay; clipboard-write"
-      allowfullscreen>
-    </iframe>
-
-    <!-- Security-camera overlay -->
-    <div class="secCam" aria-hidden="true">
-      <div class="vignette"></div>
-      <div class="scan"></div>
-      <div class="corners">
-        <div class="tl"></div><div class="tr"></div><div class="bl"></div><div class="br"></div>
-      </div>
-      <div class="hud">
-        <div class="left">
-          <span class="label">CAM 01 • LOBBY</span>
-          <span class="rec"><i></i>REC</span>
-        </div>
-        <span id="osd-time" class="time"></span>
-      </div>
-      <div class="status">FOV: 60°   ISO: 800   WB: 4300K</div>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Ark – Security Camera FOV</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      html,body { height: 100%; margin: 0; }
+      #wrap   { height: 100%; display: grid; }
+      #mp     { width: 100%; height: 100%; border: 0; }
+    </style>
+  </head>
+  <body>
+    <!-- Your space via iframe -->
+    <div id="wrap">
+      <iframe
+        id="mp"
+        allow="fullscreen; xr-spatial-tracking"
+        allowfullscreen
+        src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1&qs=1&title=0&brand=0">
+      </iframe>
     </div>
-  </div>
 
-  <script>
-    // Live timestamp for the HUD
-    const osd = document.getElementById('osd-time');
-    function tick(){
-      const d = new Date();
-      osd.textContent = d.toLocaleString([], {
-        year:'2-digit', month:'2-digit', day:'2-digit',
-        hour:'2-digit', minute:'2-digit', second:'2-digit',
-        hour12:false
+    <!-- Security camera overlay -->
+    <script type="module">
+      const SDK_KEY = "akqd0dp3hr9wz4eu70zd1rsab";
+      const iframe  = document.getElementById("mp");
+
+      iframe.addEventListener("load", async () => {
+        const sdk = await window.MP_SDK.connect(iframe, SDK_KEY, "");
+        console.log("SDK connected!");
+
+        // Register a simple SceneComponent inside Showcase
+        sdk.Scene.register("mp.securityCamera", () => {
+          return class SecurityCamera extends sdk.Scene.Component {
+            inputs = {
+              nearPlane: 0.3,
+              farPlane: 12,
+              horizontalFOV: 90,   // degrees (horizontal)
+              aspect: 16/9,        // width/height
+              localPosition: { x: 0, y: 2.6, z: 0 },
+              localRotation: { x: 0, y: 0, z: 0 }, // radians
+              color: 0x76e17f,
+              panEnabled: true,
+              panAngleDeg: 90,
+              panPeriodSec: 8
+            };
+
+            onInit() {
+              const T = this.context.three;
+
+              this._t = 0;
+              this.group = new T.Group();      // world pose
+              this.yaw   = new T.Group();      // swivel (left/right)
+              this.pitch = new T.Group();      // keep if you want tilt later
+              this.group.add(this.yaw);
+              this.yaw.add(this.pitch);
+
+              this._buildFrustum();
+              this.outputs.objectRoot = this.group;
+              this._applyTransform();
+            }
+
+            onInputsUpdated() {
+              this._applyTransform();
+              this._rebuildFrustum();
+            }
+
+            onTick(dt) {
+              if (!this.inputs.panEnabled) return;
+              this._t += dt;
+              const angle = (this.inputs.panAngleDeg || 60) * Math.PI / 180;
+              const period = Math.max(0.001, this.inputs.panPeriodSec || 8);
+              // sweep left/right like a PTZ
+              this.yaw.rotation.y = Math.sin(this._t * (2 * Math.PI / period)) * (angle / 2);
+            }
+
+            _applyTransform() {
+              const p = this.inputs.localPosition;
+              const r = this.inputs.localRotation;
+              this.group.position.set(p.x, p.y, p.z);
+              this.group.rotation.set(r.x, r.y, r.z);
+            }
+
+            _rebuildFrustum() {
+              const T = this.context.three;
+              if (this.mesh) {
+                this.mesh.geometry.dispose();
+                this.mesh.parent && this.mesh.parent.remove(this.mesh);
+              }
+              this._buildFrustum();
+            }
+
+            _buildFrustum() {
+              const T = this.context.three;
+              const hFov = (this.inputs.horizontalFOV || 90) * Math.PI / 180;
+              const aspect = this.inputs.aspect || 16/9;
+              const near = Math.max(0.01, this.inputs.nearPlane || 0.3);
+              const far  = Math.max(near + 0.01, this.inputs.farPlane || 12);
+              const nearR = Math.tan(hFov / 2) * near;
+              const farR  = Math.tan(hFov / 2) * far;
+
+              // Hollow frustum (like a stretched cone), pointing +Z
+              const geom = new T.CylinderGeometry(nearR, farR, far - near, 48, 1, true);
+              geom.translate(0, (far - near) / 2, 0);
+              geom.rotateX(Math.PI / 2);
+
+              const mat = new T.MeshBasicMaterial({
+                color: this.inputs.color ?? 0x66ff99,
+                transparent: true,
+                opacity: 0.35,
+                depthWrite: false
+              });
+              const frustum = new T.Mesh(geom, mat);
+              frustum.scale.x = aspect;      // widen for aspect ratio
+              this.mesh = frustum;
+
+              // footprint arc on the ground for a nice “wedge” look
+              const arc = new T.RingGeometry(
+                farR * 0.98, farR * 1.02, 64, 1,
+                Math.PI / 2 - hFov / 2, hFov
+              );
+              arc.rotateX(-Math.PI / 2);
+              const arcMat = new T.MeshBasicMaterial({
+                color: this.inputs.color ?? 0x66ff99,
+                transparent: true,
+                opacity: 0.5,
+                side: T.DoubleSide
+              });
+              const footprint = new T.Mesh(arc, arcMat);
+              footprint.position.z = far;
+              frustum.add(footprint);
+
+              this.pitch.add(frustum);
+            }
+          };
+        });
+
+        // Drop a camera instance (tweak numbers as you like)
+        const node = sdk.Scene.createNode();
+        node.addComponent("mp.securityCamera", {
+          nearPlane: 0.4,
+          farPlane: 14,
+          horizontalFOV: 95,
+          aspect: 16/9,
+          localPosition: { x: 2.0, y: 2.8, z: -1.0 },
+          localRotation: { x: 0, y: Math.PI * 0.60, z: 0 },
+          color: 0x73e0a3,
+          panEnabled: true,
+          panAngleDeg: 120,
+          panPeriodSec: 12
+        });
+        node.start();
+
+        console.log("Security camera registered & started.");
       });
-    }
-    tick(); setInterval(tick, 1000);
-
-    // Optional: also ask the SDK to narrow FOV (gracefully ignored if not supported)
-    (async () => {
-      try {
-        const iframe = document.getElementById('showcase');
-        const sdk = await window.MP_SDK.connect(iframe, 'akqd0dp3hr9wz4eu70zd1rsab', '3.8');
-        // Try to clamp vertical FOV ~60° (some builds expose Camera APIs; if not, the try/catch protects us)
-        if (sdk.Camera && typeof sdk.Camera.setVerticalFov === 'function') {
-          await sdk.Camera.setVerticalFov(60 * Math.PI / 180);
-        }
-        // You can also dim/grade the scene via rendering options if desired.
-      } catch (e) { /* no-op */ }
-    })();
-  </script>
-</body>
+    </script>
+  </body>
 </html>
