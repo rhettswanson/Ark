@@ -18,7 +18,6 @@
 <body>
   <div class="badge" id="badge">loading…</div>
 
-  <!-- Your space (IFRAME viewer) -->
   <iframe
     id="mp"
     allow="xr-spatial-tracking; fullscreen"
@@ -26,27 +25,54 @@
     src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1&qs=1&title=0&brand=0">
   </iframe>
 
-  <!-- 1) Load the Matterport IFRAME SDK FIRST -->
-  <script src="https://static.matterport.com/showcase-sdk/releases/3.2.1/sdk.js"></script>
-
-  <!-- 2) Your code (plain script; not type=module) -->
   <script>
   (function () {
     const SDK_KEY = "akqd0dp3hr9wz4eu70zd1rsab";
     const iframe  = document.getElementById("mp");
     const badge   = document.getElementById("badge");
+    const SDK_URL = "https://static.matterport.com/showcase-sdk/releases/3.2.1/sdk.js";
+
+    async function loadIframeSdk() {
+      if (window.MP_SDK) {
+        console.log("[Ark] MP_SDK already present");
+        return true;
+      }
+      console.log("[Ark] Loading IFRAME SDK:", SDK_URL);
+      return new Promise((resolve) => {
+        const s = document.createElement("script");
+        s.src = SDK_URL;
+        s.onload = () => {
+          console.log("[Ark] IFRAME SDK loaded. MP_SDK type:", typeof window.MP_SDK);
+          resolve(!!window.MP_SDK);
+        };
+        s.onerror = (e) => {
+          console.error("[Ark] IFRAME SDK failed to load", e);
+          resolve(false);
+        };
+        document.head.appendChild(s);
+      });
+    }
 
     iframe.addEventListener("load", async () => {
       try {
-        // Connect to Showcase
+        const ok = await loadIframeSdk();
+        if (!ok) {
+          badge.textContent = "SDK blocked (see console)";
+          console.error(
+            "[Ark] The SDK script didn't load. In DevTools → Network, filter for 'sdk.js'. " +
+            "If you see ERR_BLOCKED_BY_CLIENT, allowlist static.matterport.com (ad/content blocker)."
+          );
+          return;
+        }
+
+        console.log("[Ark] Calling MP_SDK.connect…");
         const sdk = await window.MP_SDK.connect(iframe, SDK_KEY, "3.2");
 
-        // Banner + sanity
         const info = await sdk.Model.getData();
         badge.textContent = `SDK connected — model: ${info.sid}`;
-        console.log("pose", await sdk.Camera.getPose());
+        console.log("[Ark] Connected. pose:", await sdk.Camera.getPose());
 
-        // -------- Security Camera FOV component --------
+        // ---------- Security Camera FOV component ----------
         sdk.Scene.register("ark.securityCam", () => {
           return class SecurityCam extends sdk.Scene.Component {
             static schema = {
@@ -96,7 +122,6 @@
               const nw=Math.tan(hf/2)*n, nh=Math.tan(vf/2)*n;
               const fw=Math.tan(hf/2)*f, fh=Math.tan(vf/2)*f;
 
-              // vertices (camera looks down -Z)
               const V=[[-nw,nh,-n],[nw,nh,-n],[nw,-nh,-n],[-nw,-nh,-n],[-fw,fh,-f],[fw,fh,-f],[fw,-fh,-f],[-fw,-fh,-f]];
               const idx=[0,1,2,0,2,3, 4,6,5,4,7,6, 0,4,5,0,5,1, 1,5,6,1,6,2, 2,6,7,2,7,3, 3,7,4,3,4,0];
 
@@ -104,7 +129,6 @@
               for(let i=0;i<idx.length;i++){const p=V[idx[i]]; pos[i*3]=p[0]; pos[i*3+1]=p[1]; pos[i*3+2]=p[2];}
               const g=new T.BufferGeometry(); g.setAttribute("position", new T.BufferAttribute(pos,3));
 
-              // edges
               const ep=[0,1,1,2,2,3,3,0,4,5,5,6,6,7,7,4,0,4,1,5,2,6,3,7];
               const epos=new Float32Array(ep.length*3);
               for(let i=0;i<ep.length;i++){const p=V[ep[i]]; epos[i*3]=p[0]; epos[i*3+1]=p[1]; epos[i*3+2]=p[2];}
@@ -139,7 +163,6 @@
           };
         });
 
-        // Helper: add one camera frustum at current viewer pose
         async function addCamAtViewer(hfov=90){
           const pose = await sdk.Camera.getPose();
           const node = await sdk.Scene.createNode();
@@ -153,12 +176,12 @@
           if (comp.inputs?.set) comp.inputs.set(inputs);
           else Object.assign(comp.inputs, inputs);
           await node.start();
-          console.log("security cam added", node);
+          console.log("[Ark] security cam added", node);
           return node;
         }
 
         await addCamAtViewer(90);
-        window.addCamAtViewer = addCamAtViewer; // handy in console
+        window.addCamAtViewer = addCamAtViewer;
 
       } catch (e) {
         console.error(e);
