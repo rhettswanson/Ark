@@ -3,51 +3,50 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ark – Matterport (Web Component)</title>
+  <title>Ark – Matterport (IFRAME SDK)</title>
   <style>
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
-    matterport-viewer { display:block; inline-size:100%; block-size:100dvh; }
+    #wrap { position:fixed; inset:0; }
+    #showcase { width:100%; height:100%; border:0; display:block; }
     .badge { position:absolute; left:10px; top:10px; z-index:5;
       padding:6px 10px; font:12px system-ui;
       background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px; }
   </style>
 </head>
 <body>
-  <div class="badge" id="badge">loading…</div>
+  <div id="wrap">
+    <div class="badge" id="badge">loading…</div>
+    <iframe
+      id="showcase"
+      allow="xr-spatial-tracking; fullscreen"
+      src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1&qs=1&brand=0&title=0"
+    ></iframe>
+  </div>
 
-  <matterport-viewer
-    m="1ghABoaBFPZ"
-    application-key="akqd0dp3hr9wz4eu70zd1rsab"
-    asset-base="/Ark/mp-assets"
-    play
-    title="false"
-    brand="false"
-    style="outline:0"
-  ></matterport-viewer>
+  <!-- Pin a stable SDK release -->
+  <script src="https://static.matterport.com/showcase-sdk/releases/3.2.1/sdk.js"></script>
+  <script>
+  (async () => {
+    const badge = document.getElementById('badge');
+    const iframe = document.getElementById('showcase');
 
-  <script type="module">
-  import "https://esm.sh/@matterport/webcomponent@0.1.45?deps=three@0.176.0";
-
-  const badge  = document.getElementById("badge");
-  const viewer = document.querySelector("matterport-viewer");
-
-  viewer.addEventListener("mpSdkPlaying", async (evt) => {
     try {
-      const mpSdk = evt.detail.mpSdk;
+      // Connect to Showcase
+      const sdk = await window.MP_SDK.connect(
+        iframe,
+        "akqd0dp3hr9wz4eu70zd1rsab", // your SDK key
+        "3.2"                        // SDK interface version
+      );
 
-      const info = await mpSdk.Model.getData();
+      // Sanity + banner
+      const info = await sdk.Model.getData();
       badge.textContent = `SDK connected — model: ${info.sid}`;
-      const pose = await mpSdk.Camera.getPose();
-      console.log("pose", pose);
+      console.log("pose", await sdk.Camera.getPose());
 
-      const sdk = mpSdk;
-
-      // ---------- SecurityCam component (with static schema) ----------
+      // ---------- SecurityCam component (with schema) ----------
       sdk.Scene.register("ark.securityCam", () => {
         return class SecurityCam extends sdk.Scene.Component {
-          // Back-compat: older Graph API reads a "schema.inputs" object
-          // with { type, default } descriptors.
           static schema = {
             inputs: {
               near:              { type: "number",  default: 0.30 },
@@ -66,12 +65,10 @@
             }
           };
 
-          // helper that works with both old/new input proxies
           _get(name) {
             const i = this.inputs;
-            if (i && typeof i.get === "function") return i.get(name);
+            if (i?.get) return i.get(name);
             if (i && name in i) return i[name];
-            // final fallback to schema default (first frame before proxies ready)
             const s = this.constructor.schema?.inputs?.[name];
             return s?.default;
           }
@@ -134,7 +131,6 @@
             const g = new T.BufferGeometry();
             g.setAttribute("position", new T.BufferAttribute(pos, 3));
 
-            // edges
             const edgePairs = [0,1,1,2,2,3,3,0, 4,5,5,6,6,7,7,4, 0,4,1,5,2,6,3,7];
             const epos = new Float32Array(edgePairs.length * 3);
             for (let i=0;i<edgePairs.length;i++){
@@ -194,9 +190,12 @@
         };
       });
 
-      // helper: add one at the viewer's current pose (Scene.add or Graph fallback)
+      // Add one frustum at current viewer pose
       async function addCamAtViewer(hfov = 90) {
         const pose = await sdk.Camera.getPose();
+        const node = await sdk.Scene.createNode();
+        const comp = node.addComponent("ark.securityCam");
+
         const inputs = {
           worldPosition: pose.position,
           worldRotationQuat: pose.rotation,
@@ -210,26 +209,12 @@
           panEnabled: false
         };
 
-        if (sdk.Scene && typeof sdk.Scene.add === "function") {
-          const id = await sdk.Scene.add("ark.securityCam", inputs);
-          console.log("security cam added (add):", id);
-          return id;
-        }
+        if (comp.inputs?.set) comp.inputs.set(inputs);
+        else Object.assign(comp.inputs, inputs);
 
-        if (sdk.Scene && typeof sdk.Scene.createNode === "function") {
-          const node = await sdk.Scene.createNode();
-          const comp = node.addComponent("ark.securityCam");
-
-          // On some builds inputs is a proxy with set(); on others it's a plain object.
-          if (comp?.inputs?.set) comp.inputs.set(inputs);
-          else if (comp?.inputs) Object.assign(comp.inputs, inputs);
-
-          await node.start();
-          console.log("security cam added (node):", node);
-          return comp || node;
-        }
-
-        throw new Error("Scene API not available on this SDK build");
+        await node.start();
+        console.log("security cam added", node);
+        return comp || node;
       }
 
       await addCamAtViewer(90);
@@ -239,12 +224,7 @@
       console.error(err);
       badge.textContent = "SDK init failed (see console)";
     }
-  });
-
-  viewer.addEventListener("error", (e) => {
-    console.error("Matterport webcomponent error:", e);
-    badge.textContent = "viewer error (see console)";
-  });
-</script>
+  })();
+  </script>
 </body>
 </html>
