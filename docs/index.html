@@ -32,40 +32,43 @@
   const badge  = document.getElementById("badge");
   const viewer = document.querySelector("matterport-viewer");
 
-  // Fires when Showcase is playing and the SDK is ready.
   viewer.addEventListener("mpSdkPlaying", async (evt) => {
     try {
       const mpSdk = evt.detail.mpSdk;
 
-      // your existing sanity + badge text
       const info = await mpSdk.Model.getData();
       badge.textContent = `SDK connected — model: ${info.sid}`;
       const pose = await mpSdk.Camera.getPose();
       console.log("pose", pose);
 
-      // =========================
-      // Security Camera FOV code
-      // =========================
-
       const sdk = mpSdk;
 
+      // ---- SecurityCam component (back-compatible inputs) ----
       sdk.Scene.register("ark.securityCam", () => {
         return class SecurityCam extends sdk.Scene.Component {
+
+          // Old Graph API expects descriptors (type/default). Newer API tolerates both.
           inputs = {
-            near: 0.30,
-            far: 12.0,
-            hfovDeg: 90,          // horizontal FOV (deg)
-            aspect: 16/9,         // width / height
-            color: 0x00ff88,
-            opacity: 0.15,
-            wireOpacity: 0.55,
-            worldPosition: { x: 0, y: 2.6, z: 0 },
-            worldRotationQuat: null,
-            worldEulerDeg: { x: 0, y: 0, z: 0 },
-            panEnabled: false,
-            panAngleDeg: 60,
-            panPeriodSec: 8
+            near:              { type: "number",  default: 0.30 },
+            far:               { type: "number",  default: 12.0 },
+            hfovDeg:           { type: "number",  default: 90 },
+            aspect:            { type: "number",  default: 16/9 },
+            color:             { type: "number",  default: 0x00ff88 },
+            opacity:           { type: "number",  default: 0.15 },
+            wireOpacity:       { type: "number",  default: 0.55 },
+            worldPosition:     { type: "vec3",    default: { x: 0, y: 2.6, z: 0 } },
+            worldRotationQuat: { type: "quat",    default: { x:0, y:0, z:0, w:1 } },
+            worldEulerDeg:     { type: "vec3",    default: { x: 0, y: 0, z: 0 } },
+            panEnabled:        { type: "boolean", default: false },
+            panAngleDeg:       { type: "number",  default: 60 },
+            panPeriodSec:      { type: "number",  default: 8 }
           };
+
+          // helper to read inputs on both old/new APIs
+          _get(name) {
+            const inp = this.inputs;
+            return typeof inp.get === "function" ? inp.get(name) : inp[name];
+          }
 
           onInit() {
             const T = this.context.three;
@@ -77,16 +80,16 @@
             this.yaw.add(this.pitch);
 
             this.material = new T.MeshBasicMaterial({
-              color: this.inputs.color,
+              color: this._get("color"),
               transparent: true,
-              opacity: this.inputs.opacity,
+              opacity: this._get("opacity"),
               depthWrite: false,
               side: T.DoubleSide
             });
             this.lineMat = new T.LineBasicMaterial({
-              color: this.inputs.color,
+              color: this._get("color"),
               transparent: true,
-              opacity: this.inputs.wireOpacity
+              opacity: this._get("wireOpacity")
             });
 
             this._buildFrustum();
@@ -98,29 +101,23 @@
 
           _buildFrustum() {
             const T = this.context.three;
-            const n  = this.inputs.near;
-            const f  = this.inputs.far;
-            const hf = T.MathUtils.degToRad(this.inputs.hfovDeg);
-            const a  = this.inputs.aspect;
+            const n  = this._get("near");
+            const f  = this._get("far");
+            const hf = T.MathUtils.degToRad(this._get("hfovDeg"));
+            const a  = this._get("aspect");
             const vf = 2 * Math.atan(Math.tan(hf/2) / a);
 
             const nw = Math.tan(hf/2) * n, nh = Math.tan(vf/2) * n;
             const fw = Math.tan(hf/2) * f, fh = Math.tan(vf/2) * f;
 
-            // camera looks down -Z in local space
             const V = [
-              // near
               [-nw,  nh, -n], [ nw,  nh, -n], [ nw, -nh, -n], [-nw, -nh, -n],
-              // far
               [-fw,  fh, -f], [ fw,  fh, -f], [ fw, -fh, -f], [-fw, -fh, -f],
             ];
             const idx = [
-              0,1,2, 0,2,3,  // near
-              4,6,5, 4,7,6,  // far
-              0,4,5, 0,5,1,
-              1,5,6, 1,6,2,
-              2,6,7, 2,7,3,
-              3,7,4, 3,4,0,
+              0,1,2, 0,2,3,  4,6,5, 4,7,6,
+              0,4,5, 0,5,1,  1,5,6, 1,6,2,
+              2,6,7, 2,7,3,  3,7,4, 3,4,0,
             ];
 
             const pos = new Float32Array(idx.length * 3);
@@ -155,22 +152,15 @@
 
           _applyTransform() {
             const T = this.context.three;
-            this.root.position.set(
-              this.inputs.worldPosition.x,
-              this.inputs.worldPosition.y,
-              this.inputs.worldPosition.z
-            );
+            const wp = this._get("worldPosition");
+            const q  = this._get("worldRotationQuat");
+            const e  = this._get("worldEulerDeg");
 
-            if (this.inputs.worldRotationQuat &&
-                "x" in this.inputs.worldRotationQuat) {
-              this.root.quaternion.set(
-                this.inputs.worldRotationQuat.x,
-                this.inputs.worldRotationQuat.y,
-                this.inputs.worldRotationQuat.z,
-                this.inputs.worldRotationQuat.w
-              );
+            this.root.position.set(wp.x, wp.y, wp.z);
+
+            if (q && typeof q === "object" && "w" in q) {
+              this.root.quaternion.set(q.x, q.y, q.z, q.w);
             } else {
-              const e = this.inputs.worldEulerDeg;
               this.root.rotation.set(
                 T.MathUtils.degToRad(e.x || 0),
                 T.MathUtils.degToRad(e.y || 0),
@@ -182,28 +172,24 @@
             this.pitch.rotation.set(0,0,0);
           }
 
-          onInputsChanged(inputs) {
-            if (["near","far","hfovDeg","aspect"].some(k => k in inputs)) {
-              this._buildFrustum();
-            }
-            if (["worldPosition","worldRotationQuat","worldEulerDeg"].some(k => k in inputs)) {
-              this._applyTransform();
-            }
+          onInputsChanged() {
+            // simple + robust: rebuild geometry and reapply transform
+            this._buildFrustum();
+            this._applyTransform();
           }
 
           onTick(dt) {
-            if (!this.inputs.panEnabled) return;
+            if (!this._get("panEnabled")) return;
             const T = this.context.three;
             this._t += dt;
-            const amp = T.MathUtils.degToRad(this.inputs.panAngleDeg || 60);
-            const omega = (2*Math.PI)/(this.inputs.panPeriodSec || 8);
+            const amp = T.MathUtils.degToRad(this._get("panAngleDeg") || 60);
+            const omega = (2*Math.PI)/(this._get("panPeriodSec") || 8);
             this.yaw.rotation.y = Math.sin(this._t * omega) * amp;
           }
         };
       });
 
-      // helper: add one camera at the viewer's current pose
-      // (uses Scene.add if available, else falls back to Graph API)
+      // ---- helper: add one camera at the viewer's current pose ----
       async function addCamAtViewer(hfov = 90) {
         const pose = await sdk.Camera.getPose();
 
@@ -220,7 +206,7 @@
           panEnabled: false
         };
 
-        // Newer SDKs
+        // Newer API
         if (sdk.Scene && typeof sdk.Scene.add === "function") {
           const id = await sdk.Scene.add("ark.securityCam", inputs);
           console.log("security cam added (add):", id);
@@ -238,7 +224,7 @@
             Object.assign(comp.inputs, inputs);
           }
 
-          await node.start(); // attach to scene
+          await node.start();
           console.log("security cam added (node):", node);
           return comp || node;
         }
@@ -246,13 +232,10 @@
         throw new Error("Scene API not available on this SDK build");
       }
 
-      // add one immediately
+      // add one immediately and expose helper
       await addCamAtViewer(90);
-
-      // expose helper for your console:
       window.addCamAtViewer = addCamAtViewer;
 
-      // ============ end Security Camera FOV ============
     } catch (err) {
       console.error(err);
       badge.textContent = "SDK init failed (see console)";
