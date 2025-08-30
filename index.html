@@ -1,19 +1,51 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Matterport FOV Security Camera</title>
-  </head>
-  <body>
-    <matterport-viewer
-      id="mp-viewer"
-      m="1ghABoaBFPZ"
-      application-key="akqd0dp3hr9wz4eu70zd1rsab"
-      style="width:100vw;height:100vh;border:none;">
-    </matterport-viewer>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ark – Matterport (Web Component)</title>
+  <style>
+    :root { color-scheme: dark; }
+    html,body { height:100%; margin:0; background:#111; color:#eee; }
+    matterport-viewer { display:block; inline-size:100%; block-size:100dvh; }
+    .badge { position:absolute; left:10px; top:10px; z-index:5;
+      padding:6px 10px; font:12px system-ui;
+      background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px; }
+  </style>
+</head>
+<body>
+  <div class="badge" id="badge">loading…</div>
 
-    <!-- Vite needs the SOURCE entry, not a built asset -->
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+  <matterport-viewer
+    m="1ghABoaBFPZ"
+    application-key="akqd0dp3hr9wz4eu70zd1rsab"
+    asset-base="./mp-assets"
+    play
+    title="false"
+    brand="false"
+    style="outline:0"
+  ></matterport-viewer>
+
+  <script type="module">
+    import "https://esm.sh/@matterport/webcomponent@0.1.45?deps=three@0.176.0";
+    const badge = document.getElementById("badge");
+    const viewer = document.querySelector("matterport-viewer");
+    viewer.addEventListener("mpSdkPlaying", async (evt) => {
+      try {
+        const mpSdk = evt.detail.mpSdk;
+        await mpSdk.App.state.waitUntilReady();
+        const info = await mpSdk.Model.getData();
+        badge.textContent = `SDK connected — model: ${info.sid}`;
+        // 🔜 we'll add Security Camera FOV + room-mesh here next
+      } catch (err) {
+        console.error(err);
+        badge.textContent = "SDK init failed (see console)";
+      }
+    });
+    viewer.addEventListener("error", (e) => {
+      console.error("Matterport webcomponent error:", e);
+      badge.textContent = "viewer error (see console)";
+    });
+  </script>
+</body>
 </html>
