@@ -5,9 +5,46 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Security Camera FOV in Matterport</title>
   <style>body { margin: 0; overflow: hidden; }</style>
-  <script type="module" crossorigin src="/Ark/assets/index-c9MuO3RA.js"></script>
 </head>
 <body>
-  <iframe id="showcase" width="100%" height="100%" src="bundle/showcase.html?m=1ghABoaBFPZ&applicationKey=akqd0dp3hr9wz4eu70zd1rsab" frameborder="0" allowfullscreen allow="xr-spatial-tracking"></iframe>
+  <iframe id="showcase" width="100%" height="100%" src="bundle/showcase.html?m=1ghABoaBFPZ&applicationKey=akqd0dp3hr9wz4eu70zd1rsab" frameborder="0" allowfullscreen allow="xr-spatial-tracking"></iframe>
+  <script>
+   (async () => {
+     const showcase = document.getElementById('showcase');
+     showcase.addEventListener('load', async () => {
+       try {
+         const mpSdk = await showcase.contentWindow.MP_SDK.connect(showcase.contentWindow);
+         console.log('SDK Connected:', mpSdk);
+
+         const [sceneObject] = await mpSdk.Scene.createObjects(1);
+         const node = sceneObject.addNode();
+
+         const THREE = sceneObject.context.three;
+
+         const radius = 5;  // Base radius of the cone
+         const height = 10; // Length/depth of the FOV cone
+         const radialSegments = 32;
+         const heightSegments = 1;
+
+         const geometry = new THREE.ConeGeometry(radius, height, radialSegments, heightSegments);
+         const material = new THREE.MeshBasicMaterial({ color: 0xffff00, opacity: 0.5, transparent: true, side: THREE.DoubleSide });
+
+         node.addComponent('mp.mesh', {
+           geometry: geometry,
+           material: material,
+           position: { x: 0, y: 1.5, z: 0 },
+           rotation: { x: -90, y: 0, z: 0 },
+           scale: { x: 1, y: 1, z: 1 }
+         });
+
+         node.start();
+
+         console.log('FOV cone added!');
+       } catch (e) {
+         console.error('Error:', e);
+       }
+     });
+   })();
+   </script>
 </body>
 </html>
