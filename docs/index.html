@@ -4,10 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Ark – Matterport (Web Component)</title>
-
-  <!-- Make absolute URLs like /css/... and /fonts/... resolve under /Ark/ -->
-  <base href="/Ark/">
-
   <style>
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
@@ -19,59 +15,89 @@
     }
   </style>
 
-  <!-- Local showcase CSS (also matches what the component fetches as /css/showcase.css) -->
+  <!-- Local showcase CSS so we never hit the CDN -->
   <link rel="stylesheet" href="./css/showcase.css">
 </head>
 <body>
   <div class="badge" id="badge">loading…</div>
 
+  <!-- Minimal config. IMPORTANT:
+       - Keep asset-base="/Ark" so the webcomponent looks for /Ark/css and /Ark/fonts
+       - Provide BOTH m and src; some builds only observe 'src' -->
   <matterport-viewer
-    m="1ghABoaBFPZ"
-    application-key="akqd0dp3hr9wz4eu70zd1rsab"
+    id="mpv"
     asset-base="/Ark"
-    play title="false" brand="false" style="outline:0">
+    m="1ghABoaBFPZ"
+    src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1"
+    play
+    title="false"
+    brand="false"
+    style="outline:0">
   </matterport-viewer>
 
   <script type="module">
     const badge  = document.getElementById('badge');
-    const viewer = document.querySelector('matterport-viewer');
+    const viewer = document.getElementById('mpv');
 
-    const loadScript = (url) => new Promise((res, rej) => {
-      const s = document.createElement('script');
-      s.src = url; s.async = false;
-      s.onload = () => res(url);
-      s.onerror = () => rej(new Error('failed: ' + url));
-      document.head.appendChild(s);
-    });
-
-    const WC_URLS = [
-      './vendors/matterport-webcomponent/0.1.45/webcomponent.js',
-      'https://cdn.jsdelivr.net/npm/@matterport/webcomponent@0.1.45/dist/webcomponent.js',
-      'https://unpkg.com/@matterport/webcomponent@0.1.45/dist/webcomponent.js',
-    ];
+    // --- load the local UMD build of the web component
+    function loadScript(url){
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = url; s.async = false;
+        s.onload = () => resolve(url);
+        s.onerror = () => reject(new Error('failed: ' + url));
+        document.head.appendChild(s);
+      });
+    }
 
     (async () => {
-      for (const u of WC_URLS) {
-        try { await loadScript(u); console.log('[loader] webcomponent:', u); break; }
-        catch { /* try next */ }
+      // 1) load the component
+      await loadScript('./vendors/matterport-webcomponent/0.1.45/webcomponent.js');
+      console.log('[loader] webcomponent loaded');
+
+      // 2) sanity: did the element actually register?
+      const ctor = customElements.get('matterport-viewer');
+      if (!ctor) {
+        console.error('custom element did not register');
+        badge.textContent = 'viewer failed to register (see console)';
+        return;
       }
 
-      const log = (evt) => console.log(`[${evt.type}]`, evt.detail ?? '');
-      ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
-        .forEach(t => viewer.addEventListener(t, log));
-
-      viewer.addEventListener('mpSdkPlaying', async (evt) => {
-        try {
-          const sdk = evt.detail.mpSdk;
-          const info = await sdk.Model.getData();
-          badge.textContent = `SDK connected — model: ${info.sid}`;
-          console.log('pose', await sdk.Camera.getPose());
-        } catch (err) {
-          console.error('SDK init error', err);
-          badge.textContent = 'SDK init error (see console)';
-        }
+      // 3) diagnostics — log every event the element emits
+      const events = [
+        'mpReady','mpError','mpProgress','mpCameraAvailable','mpNavigationChanged',
+        'mpSdkError','mpSdkReady','mpSdkPlaying'
+      ];
+      for (const e of events) viewer.addEventListener(e, ev => {
+        console.log(`[${e}]`, ev.detail ?? '');
       });
 
+      // 4) ensure attributes are present post-upgrade (some browsers attach late)
+      //    Also set both m and src to be extra explicit.
+      viewer.setAttribute('m', '1ghABoaBFPZ');
+      viewer.setAttribute('src', 'https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1');
+      viewer.setAttribute('play', '');
+
+      // 5) show success as soon as the viewer is ready (SDK not required)
+      viewer.addEventListener('mpReady', () => {
+        badge.textContent = 'viewer ready';
+      });
+      viewer.addEventListener('mpError', (e) => {
+        badge.textContent = 'viewer error (see console)';
+        console.error('mpError', e.detail);
+      });
+
+      // Optional: if you need the SDK later, add your key and listen for mpSdkPlaying.
+      // viewer.setAttribute('application-key', 'YOUR_KEY_HERE');
+      viewer.addEventListener('mpSdkPlaying', async (evt) => {
+        const sdk = evt.detail?.mpSdk;
+        if (!sdk) return;
+        const info = await sdk.Model.getData();
+        badge.textContent = `SDK connected — model: ${info.sid}`;
+        console.log('pose', await sdk.Camera.getPose());
+      });
+
+      // 6) watchdog: if nothing happened, tell us
       setTimeout(() => {
         if (badge.textContent.startsWith('loading')) {
           console.warn('Viewer did not reach READY/PLAYING in time');
