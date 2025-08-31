@@ -36,93 +36,34 @@
   const badge  = document.getElementById('badge');
   const viewer = document.querySelector('matterport-viewer');
 
-  // --- Security Cam component (extends Matterport's base) ---
-  function registerSecurityCam(sdk){
-    try {
-      class SecurityCam extends sdk.Scene.Component {
-        onInit(){
-          this.inputs = {
-            color: 0x66ff99,
-            opacity: 0.35,
-            showFrustum: true,
-            position: { x: 0, y: 1.6, z: 0 },
-            lookAt:   { x: 1, y: 1.6, z: 0 }
-          };
-          const THREE = this.context.three;
+  let ready = false;
+  let playing = false;
 
-          const markGeo = new THREE.SphereGeometry(0.06,16,12);
-          const markMat = new THREE.MeshBasicMaterial({ color:this.inputs.color, transparent:true, opacity:0.9 });
-          this._marker = new THREE.Mesh(markGeo, markMat);
-
-          const coneGeo = new THREE.ConeGeometry(0.35,0.5,24,1,true);
-          const coneMat = new THREE.MeshBasicMaterial({ color:this.inputs.color, wireframe:true, transparent:true, opacity:this.inputs.opacity, depthWrite:false });
-          this._frustum = new THREE.Mesh(coneGeo, coneMat);
-          this._frustum.rotation.x = -Math.PI/2;
-
-          this._group = new THREE.Group();
-          this._group.add(this._marker, this._frustum);
-          this.context.scene.add(this._group);
-        }
-
-        onInputsUpdated(){
-          if (!this._group) return;
-          const p = this.inputs.position, l = this.inputs.lookAt;
-          if (p) this._group.position.set(p.x,p.y,p.z);
-          if (l) this._group.lookAt(l.x,l.y,l.z);
-          this._frustum.visible = !!this.inputs.showFrustum;
-        }
-
-        onDestroy(){
-          this._group?.parent?.remove(this._group);
-          this._group = this._marker = this._frustum = null;
-        }
-      }
-
-      sdk.Scene.register('ark.securityCam', SecurityCam);
-      return true;
-    } catch (e){
-      console.error('SecurityCam register failed', e);
-      return false;
-    }
-  }
-
-  const log = e => console.log(`[${e.type}]`, e.detail ?? '');
-  ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
-    .forEach(t => viewer.addEventListener(t, log));
-
-  viewer.addEventListener('mpSdkPlaying', async (evt) => {
-    try{
-      const sdk = evt.detail.mpSdk;
-
-      const ok = registerSecurityCam(sdk);
-      if (!ok){ badge.textContent = 'Security Cam disabled (register failed)'; return; }
-
-      const node = await sdk.Scene.createNode();
-      const comp = node.addComponent('ark.securityCam', {}); // pass a literal {}
-      node.start();
-
-      const pose = await sdk.Camera.getPose();
-      comp.inputs.position = { x: pose.position.x, y: pose.position.y, z: pose.position.z };
-      comp.inputs.lookAt   = {
-        x: pose.position.x + pose.forward.x,
-        y: pose.position.y + pose.forward.y,
-        z: pose.position.z + pose.forward.z
-      };
-
-      const info = await sdk.Model.getData();
-      badge.textContent = `SDK connected — model: ${info.sid}`;
-    }catch(err){
-      console.error('SDK init error', err);
-      badge.textContent = 'SDK init error (see console)';
-    }
+  // show progress in the badge
+  viewer.addEventListener('mpProgress', (e) => {
+    const p = Math.round((e.detail?.percent ?? 0) * 100);
+    if (!playing) badge.textContent = `loading… ${p}%`;
   });
 
-  setTimeout(() => {
-    if (badge.textContent.startsWith('loading')){
+  viewer.addEventListener('mpReady', () => {
+    ready = true;
+    if (!playing) badge.textContent = 'model loaded — starting…';
+  });
+
+  // your existing mpSdkPlaying handler…
+  viewer.addEventListener('mpSdkPlaying', async (evt) => {
+    playing = true;
+    clearTimeout(watchdog);
+    // ... (rest of your SDK code here)
+  });
+
+  // Watchdog: only warn if *neither* ready nor playing after 30s
+  const watchdog = setTimeout(() => {
+    if (!ready && !playing) {
       console.warn('Viewer did not reach READY/PLAYING in time');
       badge.textContent = 'still loading… (check console/network)';
     }
-  }, 10000);
-  </script>
+  }, 30000);
+</script>
 </body>
 </html>
