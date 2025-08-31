@@ -42,140 +42,146 @@
 
         // ---- register component as object literal (now with outputs stub) ----
         sdk.Scene.register("ark.securityCam", () => {
-          const inputs = {
-            near: 0.3,
-            far: 12.0,
-            hfovDeg: 90,
-            aspect: 16/9,
-            color: 0x00aaff,
-            opacity: 0.18,
-            wireOpacity: 0.6,
-            worldPosition: { x: 0, y: 2.6, z: 0 },
-            worldEulerDeg: { x: 0, y: 0, z: 0 },
-            worldRotationQuat: { x: 0, y: 0, z: 0, w: 1 },
-            panEnabled: false,
-            panAngleDeg: 60,
-            panPeriodSec: 8,
-          };
+  return class SecurityCam extends sdk.Scene.Component {
+    constructor(ctx) {
+      super(ctx);
+      // ✅ Ensure plain objects (with Object.prototype)
+      this.inputs = {
+        near: 0.30,
+        far: 12.0,
+        hfovDeg: 90,
+        aspect: 16/9,
+        color: 0x00ff88,
+        opacity: 0.15,
+        wireOpacity: 0.55,
+        worldPosition: { x: 0, y: 2.6, z: 0 },
+        worldRotationQuat: null,
+        worldEulerDeg: { x: 0, y: 0, z: 0 },
+        panEnabled: false,
+        panAngleDeg: 60,
+        panPeriodSec: 8
+      };
+      this.outputs = { objectRoot: null }; // ✅ plain object
+      this._t = 0;
+    }
 
-          let root, yaw, pitch, mesh, wire, material, lineMat;
-          let tAccum = 0;
+    onInit() {
+      const T = this.context.three;
 
-          function buildFrustum(ctx, inp) {
-            const T  = ctx.three;
-            const n  = inp.near, f = inp.far;
-            const hf = T.MathUtils.degToRad(inp.hfovDeg);
-            const a  = inp.aspect;
-            const vf = 2 * Math.atan(Math.tan(hf/2) / a);
+      this.root  = new T.Group();
+      this.yaw   = new T.Group();
+      this.pitch = new T.Group();
+      this.root.add(this.yaw);
+      this.yaw.add(this.pitch);
 
-            const nw = Math.tan(hf/2) * n, nh = Math.tan(vf/2) * n;
-            const fw = Math.tan(hf/2) * f, fh = Math.tan(vf/2) * f;
+      this.material = new T.MeshBasicMaterial({
+        color: this.inputs.color,
+        transparent: true,
+        opacity: this.inputs.opacity,
+        depthWrite: false,
+        side: T.DoubleSide
+      });
+      this.lineMat = new T.LineBasicMaterial({
+        color: this.inputs.color,
+        transparent: true,
+        opacity: this.inputs.wireOpacity
+      });
 
-            const V = [
-              [-nw,  nh, -n], [ nw,  nh, -n], [ nw, -nh, -n], [-nw, -nh, -n],
-              [-fw,  fh, -f], [ fw,  fh, -f], [ fw, -fh, -f], [-fw, -fh, -f],
-            ];
-            const idx = [
-              0,1,2, 0,2,3,
-              4,6,5, 4,7,6,
-              0,4,5, 0,5,1,
-              1,5,6, 1,6,2,
-              2,6,7, 2,7,3,
-              3,7,4, 3,4,0,
-            ];
+      this._buildFrustum();
+      this._applyTransform();
 
-            const pos = new Float32Array(idx.length * 3);
-            for (let i=0;i<idx.length;i++){ const p = V[idx[i]]; pos[i*3]=p[0]; pos[i*3+1]=p[1]; pos[i*3+2]=p[2]; }
-            const g = new T.BufferGeometry();
-            g.setAttribute("position", new T.BufferAttribute(pos, 3));
+      this.outputs.objectRoot = this.root; // ✅ expose a real Object3D
+    }
 
-            const edges = [0,1,1,2,2,3,3,0, 4,5,5,6,6,7,7,4, 0,4,1,5,2,6,3,7];
-            const epos = new Float32Array(edges.length * 3);
-            for (let i=0;i<edges.length;i++){ const p = V[edges[i]]; epos[i*3]=p[0]; epos[i*3+1]=p[1]; epos[i*3+2]=p[2]; }
-            const eg = new T.BufferGeometry();
-            eg.setAttribute("position", new T.BufferAttribute(epos, 3));
+    _buildFrustum() {
+      const T = this.context.three;
+      const n  = this.inputs.near;
+      const f  = this.inputs.far;
+      const hf = T.MathUtils.degToRad(this.inputs.hfovDeg);
+      const a  = this.inputs.aspect;
+      const vf = 2 * Math.atan(Math.tan(hf/2) / a);
 
-            if (!mesh) {
-              mesh = new T.Mesh(g, material);
-              wire = new T.LineSegments(eg, lineMat);
-              pitch.add(mesh, wire);
-            } else {
-              mesh.geometry?.dispose(); wire.geometry?.dispose();
-              mesh.geometry = g; wire.geometry = eg;
-            }
-          }
+      const nw = Math.tan(hf/2) * n, nh = Math.tan(vf/2) * n;
+      const fw = Math.tan(hf/2) * f, fh = Math.tan(vf/2) * f;
 
-          function applyTransform(ctx, inp) {
-            const T = ctx.three;
-            root.position.set(inp.worldPosition.x, inp.worldPosition.y, inp.worldPosition.z);
+      const V = [
+        [-nw,  nh, -n], [ nw,  nh, -n], [ nw, -nh, -n], [-nw, -nh, -n],
+        [-fw,  fh, -f], [ fw,  fh, -f], [ fw, -fh, -f], [-fw, -fh, -f],
+      ];
+      const idx = [0,1,2, 0,2,3, 4,6,5, 4,7,6, 0,4,5, 0,5,1, 1,5,6, 1,6,2, 2,6,7, 2,7,3, 3,7,4, 3,4,0];
 
-            const q = inp.worldRotationQuat;
-            if (q && typeof q.x === "number") {
-              root.quaternion.set(q.x, q.y, q.z, q.w);
-            } else {
-              const e = inp.worldEulerDeg;
-              root.rotation.set(
-                T.MathUtils.degToRad(e.x||0),
-                T.MathUtils.degToRad(e.y||0),
-                T.MathUtils.degToRad(e.z||0),
-                "YXZ"
-              );
-            }
-            yaw.rotation.set(0,0,0);
-            pitch.rotation.set(0,0,0);
-          }
+      const pos = new Float32Array(idx.length * 3);
+      for (let i=0;i<idx.length;i++){ const p=V[idx[i]]; pos[i*3]=p[0]; pos[i*3+1]=p[1]; pos[i*3+2]=p[2]; }
 
-          return {
-            inputs,
-            /** IMPORTANT: predefine outputs so the proxy doesn’t hit undefined */
-            outputs: { objectRoot: null },
+      const g = new T.BufferGeometry();
+      g.setAttribute("position", new T.BufferAttribute(pos, 3));
 
-            onInit() {
-              const T = this.context.three;
-              root  = new T.Group();
-              yaw   = new T.Group();
-              pitch = new T.Group();
-              root.add(yaw); yaw.add(pitch);
+      // edges
+      const edgePairs = [0,1,1,2,2,3,3,0, 4,5,5,6,6,7,7,4, 0,4,1,5,2,6,3,7];
+      const epos = new Float32Array(edgePairs.length * 3);
+      for (let i=0;i<edgePairs.length;i++){ const p=V[edgePairs[i]]; epos[i*3]=p[0]; epos[i*3+1]=p[1]; epos[i*3+2]=p[2]; }
+      const eg = new T.BufferGeometry();
+      eg.setAttribute("position", new T.BufferAttribute(epos, 3));
 
-              material = new T.MeshBasicMaterial({
-                color: inputs.color, transparent:true, opacity: inputs.opacity,
-                depthWrite:false, side:T.DoubleSide
-              });
-              lineMat = new T.LineBasicMaterial({
-                color: inputs.color, transparent:true, opacity: inputs.wireOpacity
-              });
+      if (!this.mesh) {
+        const T3 = this.context.three;
+        this.mesh = new T3.Mesh(g, this.material);
+        this.wire = new T3.LineSegments(eg, this.lineMat);
+        this.pitch.add(this.mesh, this.wire);
+      } else {
+        this.mesh.geometry?.dispose();
+        this.wire.geometry?.dispose();
+        this.mesh.geometry = g;
+        this.wire.geometry = eg;
+      }
+    }
 
-              buildFrustum(this.context, inputs);
-              applyTransform(this.context, inputs);
+    _applyTransform() {
+      const T = this.context.three;
+      this.root.position.set(
+        this.inputs.worldPosition.x,
+        this.inputs.worldPosition.y,
+        this.inputs.worldPosition.z
+      );
 
-              this.outputs.objectRoot = root;
-            },
+      if (this.inputs.worldRotationQuat && "x" in this.inputs.worldRotationQuat) {
+        this.root.quaternion.set(
+          this.inputs.worldRotationQuat.x,
+          this.inputs.worldRotationQuat.y,
+          this.inputs.worldRotationQuat.z,
+          this.inputs.worldRotationQuat.w
+        );
+      } else {
+        const e = this.inputs.worldEulerDeg;
+        this.root.rotation.set(
+          T.MathUtils.degToRad(e.x || 0),
+          T.MathUtils.degToRad(e.y || 0),
+          T.MathUtils.degToRad(e.z || 0),
+          "YXZ"
+        );
+      }
+      this.yaw.rotation.set(0,0,0);
+      this.pitch.rotation.set(0,0,0);
+    }
 
-            onInputsChanged(changed) {
-              if (changed.near || changed.far || changed.hfovDeg || changed.aspect) {
-                buildFrustum(this.context, this.inputs);
-              }
-              if (changed.worldPosition || changed.worldRotationQuat || changed.worldEulerDeg) {
-                applyTransform(this.context, this.inputs);
-              }
-              if (changed.color || changed.opacity || changed.wireOpacity) {
-                material.color.set(this.inputs.color);
-                material.opacity = this.inputs.opacity;
-                lineMat.color.set(this.inputs.color);
-                lineMat.opacity = this.inputs.wireOpacity;
-              }
-            },
+    onInputsChanged(changed) {
+      if (changed.near || changed.far || changed.hfovDeg || changed.aspect) {
+        this._buildFrustum();
+      }
+      if (changed.worldPosition || changed.worldRotationQuat || changed.worldEulerDeg) {
+        this._applyTransform();
+      }
+    }
 
-            onTick(dt) {
-              if (!this.inputs.panEnabled) return;
-              const T = this.context.three;
-              tAccum += dt;
-              const amp   = T.MathUtils.degToRad(this.inputs.panAngleDeg||60);
-              const omega = (2*Math.PI)/(this.inputs.panPeriodSec||8);
-              yaw.rotation.y = Math.sin(tAccum * omega) * amp;
-            }
-          };
-        });
+    onTick(dt) {
+      if (!this.inputs.panEnabled) return;
+      const T = this.context.three;
+      const amp = T.MathUtils.degToRad(this.inputs.panAngleDeg || 60);
+      const omega = (2*Math.PI)/(this.inputs.panPeriodSec || 8);
+      this.yaw.rotation.y = Math.sin((this._t += dt) * omega) * amp;
+    }
+  };
+});
         // ---- end registration ----
 
         async function addCamAtViewer(hfov = 90) {
