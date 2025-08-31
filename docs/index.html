@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ark – Matterport (Sanity Check)</title>
+  <title>Ark – Matterport (Web Component)</title>
   <style>
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
@@ -13,13 +13,12 @@
       padding:6px 10px; font:12px system-ui;
       background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px;
     }
-    .badge b { color:#9ff59f; }
   </style>
 
-  <!-- Local showcase CSS (no CDN hits) -->
+  <!-- Local showcase CSS -->
   <link rel="stylesheet" href="./css/showcase.css" />
 
-  <!-- Import map: local three + local webcomponent ESM -->
+  <!-- Import map (local Three + local Matterport webcomponent ESM) -->
   <script type="importmap">
   {
     "imports": {
@@ -46,103 +45,106 @@
     const badge  = document.getElementById('badge');
     const viewer = document.querySelector('matterport-viewer');
 
-    // Basic diagnostics for the viewer itself
+    // Basic diagnostics in console
     const log = (e) => console.log(`[${e.type}]`, e.detail ?? '');
     ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
       .forEach(t => viewer.addEventListener(t, log));
 
-    // ---- Helper: try to resolve a real Scene base class we can extend safely
-    function resolveBaseComponent(sdk) {
-      const scene = sdk?.Scene;
-      console.log('Scene typeof:', typeof scene);
-      if (!scene) return null;
-
-      try {
-        console.log('Scene keys:', Object.keys(scene));
-      } catch (_) {
-        // ignore if keys not enumerable
-      }
-
-      // 1) Common case: a function/class
-      if (typeof scene.Component === 'function') {
-        console.log('Resolved BaseComponent via Scene.Component (function).');
-        return scene.Component;
-      }
-
-      // 2) Some builds: module object with a default export
-      if (scene.Component && typeof scene.Component === 'object' && typeof scene.Component.default === 'function') {
-        console.log('Resolved BaseComponent via Scene.Component.default (function).');
-        return scene.Component.default;
-      }
-
-      // 3) Fallback: scan values to find a function that looks like a Component base
-      try {
-        const candidates = Object.entries(scene)
-          .filter(([k, v]) => typeof v === 'function')
-          .map(([k, v]) => ({ name:k, ctor:v }));
-
-        console.log('Function candidates in Scene:', candidates.map(c => c.name));
-
-        // Heuristic: look for something whose prototype has lifecycle-ish members or inputs
-        const picked = candidates.find(c => {
-          const p = c.ctor?.prototype ?? {};
-          return ('onInit' in p) || ('onDestroy' in p) || ('onInputsUpdated' in p);
-        });
-
-        if (picked) {
-          console.log('Resolved BaseComponent via heuristic:', picked.name);
-          return picked.ctor;
-        }
-      } catch (e) {
-        console.warn('Heuristic scan failed:', e);
-      }
-
-      console.warn('Could not resolve a valid Component base class.');
-      return null;
+    // Resolve a *real* Scene.Component base (varies by SDK bundle shape)
+    function resolveSceneBase(sdk) {
+      const C = sdk?.Scene?.Component;
+      const candidates = [
+        C,
+        C?.Component,
+        C?.Base,
+        C?.BaseComponent,
+        C?.default
+      ];
+      const Base = candidates.find(fn => typeof fn === 'function') || null;
+      console.log('[resolver] Scene.Component typeof:', typeof C, 'Resolved Base fn:', !!Base);
+      return Base;
     }
 
-    // ---- Main: try to register a minimal component only if safe
     viewer.addEventListener('mpSdkPlaying', async (evt) => {
       try {
         const sdk = evt.detail.mpSdk;
 
-        // Introspect first
-        const BaseComponent = resolveBaseComponent(sdk);
-        console.log('Final BaseComponent typeof:', typeof BaseComponent);
-
-        if (BaseComponent) {
-          // Guard double-register on hot reload
-          try {
-            sdk.Scene.register('x.dummy', class extends BaseComponent {
-              onInit() {
-                // Keep inputs as a literal plain object (no getters/proxies)
-                this.inputs = {};
-              }
-            });
-            console.log('Registered x.dummy successfully.');
-          } catch (e) {
-            if (!/already registered/i.test(String(e?.message))) throw e;
-            console.log('x.dummy already registered (ok).');
-          }
-
-          // Attach it with a literal {} to avoid proxy traps
-          const node = await sdk.Scene.createNode();
-          node.addComponent('x.dummy', {});
-          node.start();
-          console.log('Created node and added x.dummy with {} inputs.');
-        } else {
-          console.warn('Skipping registration because no valid BaseComponent was found.');
+        const Base = resolveSceneBase(sdk);
+        if (!Base) {
+          console.error('No valid Scene.Component base found — Security Cam disabled.');
+          // Keep the page alive and update the badge
+          const info = await sdk.Model.getData();
+          badge.textContent = `SDK connected — model: ${info.sid}`;
+          return;
         }
 
+        // --- Register Security Cam using the *real* base (gives us context/three/scene)
+        sdk.Scene.register('ark.securityCam', class extends Base {
+          onInit() {
+            // Keep inputs a plain POJO (avoids Proxy/hasOwnProperty issues)
+            this.inputs = {
+              color: 0x66ff99,
+              opacity: 0.35,
+              position: { x: 0,   y: 1.6, z: 0 },
+              lookAt:   { x: 1.2, y: 1.6, z: 0 },
+              showFrustum: true
+            };
+
+            const THREE = this.context.three;
+
+            // Marker
+            const markGeo = new THREE.SphereGeometry(0.06, 16, 12);
+            const markMat = new THREE.MeshBasicMaterial({
+              color: this.inputs.color, transparent:true, opacity:0.9
+            });
+            this._marker = new THREE.Mesh(markGeo, markMat);
+
+            // Simple wireframe frustum cone
+            const frustGeo = new THREE.ConeGeometry(0.35, 0.5, 24, 1, true);
+            const frustMat = new THREE.MeshBasicMaterial({
+              color: this.inputs.color, wireframe:true, transparent:true,
+              opacity:this.inputs.opacity, depthWrite:false
+            });
+            this._frustum = new THREE.Mesh(frustGeo, frustMat);
+            this._frustum.rotation.x = -Math.PI / 2;
+
+            // Group + add to Matterport scene
+            this._group = new THREE.Group();
+            this._group.add(this._marker, this._frustum);
+            this.context.scene.add(this._group);
+
+            // Initial placement
+            this.onInputsUpdated();
+          }
+
+          onInputsUpdated() {
+            if (!this._group) return;
+            const p = this.inputs.position, l = this.inputs.lookAt;
+            if (p) this._group.position.set(p.x, p.y, p.z);
+            if (l) this._group.lookAt(l.x, l.y, l.z);
+          }
+
+          onDestroy() {
+            this._group?.parent?.remove(this._group);
+            this._group = this._marker = this._frustum = null;
+          }
+        });
+
+        // Create a node and attach the cam (pass a *plain* {} to avoid proxy traps)
+        const node = await sdk.Scene.createNode();
+        node.addComponent('ark.securityCam', {});  // important: literal {}
+        node.start();
+
+        // Badge
         const info = await sdk.Model.getData();
-        badge.innerHTML = `<b>SDK connected</b> — model: ${info.sid}`;
+        badge.textContent = `SDK connected — model: ${info.sid}`;
       } catch (err) {
         console.error('SDK init error', err);
         badge.textContent = 'SDK init error (see console)';
       }
     });
 
-    // Timeout notice if nothing happens
+    // Timeout notice if viewer never reaches READY/PLAYING
     setTimeout(() => {
       if (badge.textContent.startsWith('loading')) {
         console.warn('Viewer did not reach READY/PLAYING in time');
