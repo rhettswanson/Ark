@@ -18,7 +18,7 @@
   <!-- Local showcase CSS (no CDN) -->
   <link rel="stylesheet" href="./css/showcase.css" />
 
-  <!-- Import map for local ESM assets used by the webcomponent -->
+  <!-- Import map: resolve three + webcomponent to local files -->
   <script type="importmap">
   {
     "imports": {
@@ -32,6 +32,7 @@
 <body>
   <div class="badge" id="badge">loading…</div>
 
+  <!-- Minimal viewer -->
   <matterport-viewer
     m="1ghABoaBFPZ"
     application-key="akqd0dp3hr9wz4eu70zd1rsab"
@@ -42,105 +43,85 @@
   <script type="module">
     import "@matterport/webcomponent";
 
-    const badge  = document.getElementById('badge');
-    const viewer = document.querySelector('matterport-viewer');
-
-    // Log useful events
-    const log = (e) => console.log(`[${e.type}]`, e.detail ?? '');
-    ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
-      .forEach(t => viewer.addEventListener(t, log));
-
-    // --- Security Cam component (minimal, crash-proof) -----------------------
-    // NOTE: Use only plain objects for inputs. Do not pass options to addComponent.
+    // --- Security cam (factory style) ---
     function registerSecurityCam(sdk) {
       try {
-        sdk.Scene.register('ark.securityCam', (sdkCtx) => {
-          return class ArkSecurityCam extends sdkCtx.Scene.Component {
-            constructor(ctx) {
-              super(ctx);
-              // plain-object inputs (no Maps/Proxies/Object.create(null))
-              this.inputs = {
-                fov: 30,
-                near: 0.1,
-                far:  200,
-                position: { x: 0, y: 1.7, z: 0 },
-                lookAt:   { x: 0, y: 1.5, z: -1 }
-              };
-            }
-
+        sdk.Scene.register('ark.securityCam', (ctx) => {
+          const THREE = ctx.three;
+          return {
+            inputs: {
+              fov: 30, near: 0.1, far: 200,
+              position: { x: 0, y: 1.7, z: 0 },
+              lookAt:   { x: 0, y: 1.5, z: -1 }
+            },
             onInit() {
-              const THREE = this.context.three;
-
-              // Camera primitive (not used for viewing—just the “security cam” object)
+              // Camera representation (not rendering to screen, just demo marker)
               this._camera = new THREE.PerspectiveCamera(
                 this.inputs.fov, 1, this.inputs.near, this.inputs.far
               );
               this._camera.position.set(
-                this.inputs.position.x,
-                this.inputs.position.y,
-                this.inputs.position.z
+                this.inputs.position.x, this.inputs.position.y, this.inputs.position.z
               );
               this._camera.lookAt(
-                this.inputs.lookAt.x,
-                this.inputs.lookAt.y,
-                this.inputs.lookAt.z
+                this.inputs.lookAt.x, this.inputs.lookAt.y, this.inputs.lookAt.z
               );
 
-              // Simple visible marker (a small cone)
-              const geo  = new THREE.ConeGeometry(0.1, 0.25, 24);
+              // Simple visual marker so we can see where the cam is
+              const cone = new THREE.ConeGeometry(0.1, 0.25, 24);
               const mat  = new THREE.MeshBasicMaterial({ color: 0x00e0ff });
-              this._marker = new THREE.Mesh(geo, mat);
+              this._marker = new THREE.Mesh(cone, mat);
               this._marker.position.copy(this._camera.position);
               this._marker.rotation.x = -Math.PI / 2;
 
-              // Attach to the MP scene root
-              this.context.scene.add(this._marker);
-
-              console.log('[securityCam] initialized at', this._camera.position);
-            }
-
+              ctx.scene.add(this._marker);
+            },
             onDestroy() {
-              if (this._marker && this._marker.parent) {
-                this._marker.parent.remove(this._marker);
-              }
+              if (this._marker?.parent) this._marker.parent.remove(this._marker);
               this._marker = null;
               this._camera = null;
             }
           };
         });
-      } catch (err) {
-        // If already registered, ignore; otherwise surface it
-        if (!/already registered/i.test(String(err?.message))) {
-          throw err;
-        }
+      } catch (e) {
+        // Ignore re-register attempts during hot reloads
+        if (!/already registered/i.test(String(e?.message))) throw e;
       }
     }
 
-    // --- Bootstrap on SDK ready ----------------------------------------------
+    const badge  = document.getElementById('badge');
+    const viewer = document.querySelector('matterport-viewer');
+
+    // Diagnostics
+    const log = (e) => console.log(`[${e.type}]`, e.detail ?? '');
+    ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
+      .forEach(t => viewer.addEventListener(t, log));
+
+    // SDK hook
     viewer.addEventListener('mpSdkPlaying', async (evt) => {
       try {
         const sdk = evt.detail.mpSdk;
 
-        // Register our component once
+        // Register the scene component
         registerSecurityCam(sdk);
 
-        // Get current pose to place the cam where the viewer is
-        const pose = await sdk.Camera.getPose();
-        const p    = (pose && pose.position) ? pose.position : {x:0,y:1.7,z:0};
-        const fwd  = { x: 0, y: 1.5, z: -1 };
-
-        // Create node -> add component -> start (NO options object passed!)
+        // Create a node and attach the component — pass {} (CRUCIAL)
         const node = await sdk.Scene.createNode();
-        const comp = node.addComponent('ark.securityCam'); // <-- no options param
-        // set inputs via plain objects
-        comp.inputs.position = { x: p.x, y: p.y, z: p.z };
-        comp.inputs.lookAt   = { ...fwd };
+        const comp = node.addComponent('ark.securityCam', {}); // <= fixes hasOwnProperty crash
+
+        // Seed initial position from the current camera pose
+        const pose = await sdk.Camera.getPose();
+        comp.inputs.position = { x: pose.position.x, y: pose.position.y, z: pose.position.z };
+        // Aim the lookAt forward from the current pose
+        comp.inputs.lookAt = {
+          x: pose.position.x + pose.forward.x,
+          y: pose.position.y + pose.forward.y,
+          z: pose.position.z + pose.forward.z
+        };
+
         node.start();
 
-        // Nice badge text
         const info = await sdk.Model.getData();
         badge.textContent = `SDK connected — model: ${info.sid}`;
-
       } catch (err) {
         console.error('SDK init error', err);
         badge.textContent = 'SDK init error (see console)';
