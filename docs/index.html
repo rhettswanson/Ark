@@ -18,32 +18,6 @@
 
         const THREE = showcase.contentWindow.THREE;
 
-        mpSdk.Scene.register('mp.mesh', function () {
-          return {
-            name: 'mp.mesh',
-            inputs: { geometry: null, material: null, position: { x: 0, y: 0, z: 0 }, rotation: { x: 0, y: 0, z: 0 }, scale: { x: 1, y: 1, z: 1 } },
-            outputs: {},
-            onInit: function () {
-              const T = this.context.three;
-              this.mesh = new T.Mesh(this.inputs.geometry, this.inputs.material);
-
-              // Initialize group if needed, but directly add to objectRoot
-              if (this.outputs.objectRoot) {
-                this.outputs.objectRoot.add(this.mesh);
-              } else {
-                console.error('objectRoot not defined');
-              }
-
-              this.mesh.position.set(this.inputs.position.x, this.inputs.position.y, this.inputs.position.z);
-              this.mesh.rotation.set(T.MathUtils.degToRad(this.inputs.rotation.x), T.MathUtils.degToRad(this.inputs.rotation.y), T.MathUtils.degToRad(this.inputs.rotation.z));
-              this.mesh.scale.set(this.inputs.scale.x, this.inputs.scale.y, this.inputs.scale.z);
-            },
-            onDestroy: function () {
-              this.outputs.objectRoot.remove(this.mesh);
-            },
-          };
-        });
-
         const [sceneObject] = await mpSdk.Scene.createObjects(1);
         const node = sceneObject.addNode();
 
@@ -55,15 +29,16 @@
         const geometry = new THREE.ConeGeometry(radius, height, radialSegments, heightSegments);
         const material = new THREE.MeshBasicMaterial({ color: 0xffff00, opacity: 0.5, transparent: true, side: THREE.DoubleSide });
 
-        node.addComponent('mp.mesh', {
-          geometry: geometry,
-          material: material,
-          position: { x: 0, y: 1.5, z: 0 },
-          rotation: { x: -90, y: 0, z: 0 },
-          scale: { x: 1, y: 1, z: 1 }
-        });
+        const mesh = new THREE.Mesh(geometry, material);
 
         node.start();
+
+        node.objectRoot.add(mesh);
+
+        // Set using object assignment
+        mesh.position = { x: 0, y: 1.5, z: 0 };
+        mesh.rotation = { x: THREE.MathUtils.degToRad(-90), y: 0, z: 0 };
+        mesh.scale = { x: 1, y: 1, z: 1 };
 
         console.log('FOV cone added!');
       } catch (e) {
