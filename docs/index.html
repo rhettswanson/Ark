@@ -18,17 +18,16 @@
   <!-- Local showcase CSS -->
   <link rel="stylesheet" href="./css/showcase.css" />
 
-  <!-- Import map (valid JSON only; no trailing commas) -->
-  <!-- put this in <head>, before any <script type="module"> -->
-<script type="importmap">
-{
-  "imports": {
-    "three": "./vendors/three/0.176.0/build/three.module.js",
-    "three/addons/": "./vendors/three/0.176.0/examples/jsm/",
-    "@matterport/webcomponent": "./vendors/matterport-webcomponent/0.1.45/matterport-viewer.esm.js"
+  <!-- Import map (valid JSON only) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendors/three/0.176.0/build/three.module.js",
+      "three/addons/": "./vendors/three/0.176.0/examples/jsm/",
+      "@matterport/webcomponent": "./vendors/matterport-webcomponent/0.1.45/matterport-viewer.esm.js"
+    }
   }
-}
-</script>
+  </script>
 </head>
 <body>
   <div class="badge" id="badge">loading…</div>
@@ -45,92 +44,108 @@
 
     const badge  = document.getElementById('badge');
     const viewer = document.querySelector('matterport-viewer');
-    const set = (t) => badge.textContent = t;
+    const set = (t) => (badge.textContent = t);
 
     // Helpful diagnostics
     ['mpReady','mpPlaying','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
       .forEach(ev => viewer.addEventListener(ev, e => console.log(`[${ev}]`, e.detail ?? null)));
 
-    // Add a tiny “security cam” gizmo when SDK is ready
-    viewer.addEventListener('mpSdkPlaying', async (evt) => {
+    // Utility: safe check for a constructable base class
+    function isConstructable(fn) {
       try {
-        const sdk = evt.detail.mpSdk;
-        set('SDK ✓ — adding cam');
+        // Will throw if not a constructor / not extendable across realms
+        // eslint-disable-next-line no-new-func
+        class T extends fn {}
+        return true;
+      } catch { return false; }
+    }
 
-        // Resolve a valid Scene.Component base (handles default export variant)
-        const candidates = [sdk?.Scene?.Component, sdk?.Scene?.Component?.default].filter(Boolean);
-        let Base = null;
-        for (const C of candidates) {
-          try { class T extends C {}; Base = C; break; } catch {}
+    // Main
+    viewer.addEventListener('mpSdkPlaying', async (evt) => {
+      const sdk = evt.detail?.mpSdk;
+      if (!sdk) { set('SDK missing'); return; }
+
+      set('SDK ✓ — probing Scene');
+      console.log('sdk keys:', Object.keys(sdk));
+      console.log('sdk.Scene keys:', sdk.Scene ? Object.keys(sdk.Scene) : '(none)');
+      console.log('typeof sdk.Scene.register:', typeof sdk.Scene?.register);
+      console.log('sdk.Scene.Component:', sdk.Scene?.Component);
+
+      // Try the normal Scene.Component subclass path
+      let added = false;
+      const Base = sdk?.Scene?.Component;
+      const canSubclass = Base && isConstructable(Base);
+
+      if (canSubclass && typeof sdk.Scene.register === 'function') {
+        try {
+          sdk.Scene.register('ark.securityCam', class extends Base {
+            onInit() {
+              this.inputs = {
+                color: 0x66ff99,
+                opacity: 0.6,
+                position: { x: 0, y: 1.6, z: 0 },
+                lookAt:   { x: 1, y: 1.6, z: 0 }
+              };
+              const THREE = this.context.three;
+
+              const marker = new THREE.Mesh(
+                new THREE.SphereGeometry(0.06, 16, 12),
+                new THREE.MeshBasicMaterial({ color: this.inputs.color, transparent:true, opacity:0.9 })
+              );
+
+              const wedge = new THREE.Mesh(
+                new THREE.ConeGeometry(0.25, 0.45, 20, 1, true),
+                new THREE.MeshBasicMaterial({ color: this.inputs.color, wireframe:true, transparent:true, opacity:this.inputs.opacity, depthWrite:false })
+              );
+              wedge.rotation.x = -Math.PI / 2;
+
+              this._group = new THREE.Group();
+              this._group.add(marker, wedge);
+              this.context.scene.add(this._group);
+            }
+            onInputsUpdated() {
+              if (!this._group) return;
+              const p = this.inputs.position, l = this.inputs.lookAt;
+              if (p) this._group.position.set(p.x, p.y, p.z);
+              if (l) this._group.lookAt(l.x, l.y, l.z);
+            }
+            onDestroy() {
+              this._group?.parent?.remove(this._group);
+              this._group = null;
+            }
+          });
+
+          const pose = await sdk.Camera.getPose();
+          const node = await sdk.Scene.createNode();
+          const comp = node.addComponent('ark.securityCam', {});
+          comp.inputs.position = { ...pose.position };
+          const f = pose.forward;
+          comp.inputs.lookAt = { x: pose.position.x + f.x, y: pose.position.y + f.y, z: pose.position.z + f.z };
+          node.start();
+
+          set('SDK ✓ cam added');
+          added = true;
+        } catch (err) {
+          console.warn('Scene.Component path failed, will try fallback.', err);
         }
-        if (!Base) {
-          console.warn('No valid Scene.Component base found — cam disabled.');
-          set('SDK ✓ (cam disabled)');
-          return;
+      }
+
+      // Fallback: drop a Mattertag where the camera is (works without Scene.Component)
+      if (!added) {
+        try {
+          const pose = await sdk.Camera.getPose();
+          await sdk.Mattertag.add([{
+            label: 'Cam',
+            description: 'Fallback marker (Scene.Component unavailable)',
+            anchorPosition: pose.position,
+            stemVector: { x: 0, y: 0.2, z: 0 }
+          }]);
+          set('SDK ✓ tag added (fallback)');
+          console.warn('No constructable Scene.Component; used Mattertag fallback.');
+        } catch (err) {
+          set('SDK init error (see console)');
+          console.error('Fallback Mattertag failed:', err);
         }
-
-        // Register a minimal, safe component
-        sdk.Scene.register('ark.securityCam', class extends Base {
-          onInit() {
-            this.inputs = {
-              color: 0x66ff99,
-              opacity: 0.6,
-              position: { x: 0, y: 1.6, z: 0 },
-              lookAt:   { x: 1, y: 1.6, z: 0 }
-            };
-
-            const THREE = this.context.three;
-
-            const marker = new THREE.Mesh(
-              new THREE.SphereGeometry(0.06, 16, 12),
-              new THREE.MeshBasicMaterial({ color: this.inputs.color, transparent:true, opacity:0.9 })
-            );
-
-            const wedge = new THREE.Mesh(
-              new THREE.ConeGeometry(0.25, 0.45, 20, 1, true),
-              new THREE.MeshBasicMaterial({
-                color: this.inputs.color, wireframe:true,
-                transparent:true, opacity:this.inputs.opacity, depthWrite:false
-              })
-            );
-            wedge.rotation.x = -Math.PI / 2;
-
-            this._group = new THREE.Group();
-            this._group.add(marker, wedge);
-            this.context.scene.add(this._group);
-          }
-
-          onInputsUpdated() {
-            if (!this._group) return;
-            const p = this.inputs.position, l = this.inputs.lookAt;
-            if (p) this._group.position.set(p.x, p.y, p.z);
-            if (l) this._group.lookAt(l.x, l.y, l.z);
-          }
-
-          onDestroy() {
-            this._group?.parent?.remove(this._group);
-            this._group = null;
-          }
-        });
-
-        // Place the cam at the current viewer pose
-        const pose = await sdk.Camera.getPose();
-        const node = await sdk.Scene.createNode();
-        const comp = node.addComponent('ark.securityCam', {});
-
-        comp.inputs.position = { ...pose.position };
-        const f = pose.forward;
-        comp.inputs.lookAt = {
-          x: pose.position.x + f.x,
-          y: pose.position.y + f.y,
-          z: pose.position.z + f.z
-        };
-
-        node.start();
-        set('SDK ✓ cam added');
-      } catch (err) {
-        console.error('SDK init error', err);
-        set('SDK init error (see console)');
       }
     });
 
