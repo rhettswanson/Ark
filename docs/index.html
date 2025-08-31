@@ -15,36 +15,47 @@
     }
   </style>
 
-  <!-- Load the ESM module; it will register <matterport-viewer>
-       and pull its CSS/fonts from ./vendors/.../built-bundle/...  -->
-  <script type="module" src="./vendors/matterport-webcomponent/0.1.45/matterport-viewer.esm.js"></script>
+  <!-- Local showcase CSS (no CDN) -->
+  <link rel="stylesheet" href="./css/showcase.css" />
+
+  <!-- Import map: resolve "three" to your local ESM build -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendors/three/0.176.0/build/three.module.js",
+      "three/addons/": "./vendors/three/0.176.0/examples/jsm/",
+      "@matterport/webcomponent": "./vendors/matterport-webcomponent/0.1.45/matterport-viewer.esm.js"
+    }
+  }
+  </script>
 </head>
 <body>
   <div class="badge" id="badge">loading…</div>
 
-  <!-- Minimal config; no asset-base needed for the component itself -->
+  <!-- Keep it minimal -->
   <matterport-viewer
     m="1ghABoaBFPZ"
     application-key="akqd0dp3hr9wz4eu70zd1rsab"
-    play
-    title="false"
-    brand="false"
-    style="outline:0">
+    asset-base="/Ark"
+    play title="false" brand="false" style="outline:0">
   </matterport-viewer>
 
   <script type="module">
+    // Load the ESM web component via the import map
+    import "@matterport/webcomponent";
+
     const badge  = document.getElementById('badge');
     const viewer = document.querySelector('matterport-viewer');
 
-    // log useful lifecycle events
-    const log = (evt) => console.log(`[${evt.type}]`, evt.detail ?? '');
+    // Helpful diagnostics
+    const log = (e) => console.log(`[${e.type}]`, e.detail ?? '');
     ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
       .forEach(t => viewer.addEventListener(t, log));
 
-    // When the SDK is ready/playing, run your code
+    // SDK
     viewer.addEventListener('mpSdkPlaying', async (evt) => {
       try {
-        const sdk  = evt.detail.mpSdk;
+        const sdk = evt.detail.mpSdk;
         const info = await sdk.Model.getData();
         badge.textContent = `SDK connected — model: ${info.sid}`;
         console.log('pose', await sdk.Camera.getPose());
@@ -54,7 +65,7 @@
       }
     });
 
-    // Timeout hint if nothing fires
+    // Timeout notice if nothing happens
     setTimeout(() => {
       if (badge.textContent.startsWith('loading')) {
         console.warn('Viewer did not reach READY/PLAYING in time');
