@@ -15,10 +15,10 @@
     }
   </style>
 
-  <!-- Local showcase CSS (no CDN) -->
+  <!-- Local showcase CSS -->
   <link rel="stylesheet" href="./css/showcase.css" />
 
-  <!-- Import map: resolve three + webcomponent to local files -->
+  <!-- Import map -->
   <script type="importmap">
   {
     "imports": {
@@ -32,7 +32,6 @@
 <body>
   <div class="badge" id="badge">loading…</div>
 
-  <!-- Minimal viewer -->
   <matterport-viewer
     m="1ghABoaBFPZ"
     application-key="akqd0dp3hr9wz4eu70zd1rsab"
@@ -43,80 +42,88 @@
   <script type="module">
     import "@matterport/webcomponent";
 
-    // --- Security cam (factory style) ---
-    function registerSecurityCam(sdk) {
-      try {
-        sdk.Scene.register('ark.securityCam', (ctx) => {
-          const THREE = ctx.three;
-          return {
-            inputs: {
-              fov: 30, near: 0.1, far: 200,
-              position: { x: 0, y: 1.7, z: 0 },
-              lookAt:   { x: 0, y: 1.5, z: -1 }
-            },
-            onInit() {
-              // Camera representation (not rendering to screen, just demo marker)
-              this._camera = new THREE.PerspectiveCamera(
-                this.inputs.fov, 1, this.inputs.near, this.inputs.far
-              );
-              this._camera.position.set(
-                this.inputs.position.x, this.inputs.position.y, this.inputs.position.z
-              );
-              this._camera.lookAt(
-                this.inputs.lookAt.x, this.inputs.lookAt.y, this.inputs.lookAt.z
-              );
-
-              // Simple visual marker so we can see where the cam is
-              const cone = new THREE.ConeGeometry(0.1, 0.25, 24);
-              const mat  = new THREE.MeshBasicMaterial({ color: 0x00e0ff });
-              this._marker = new THREE.Mesh(cone, mat);
-              this._marker.position.copy(this._camera.position);
-              this._marker.rotation.x = -Math.PI / 2;
-
-              ctx.scene.add(this._marker);
-            },
-            onDestroy() {
-              if (this._marker?.parent) this._marker.parent.remove(this._marker);
-              this._marker = null;
-              this._camera = null;
-            }
-          };
-        });
-      } catch (e) {
-        // Ignore re-register attempts during hot reloads
-        if (!/already registered/i.test(String(e?.message))) throw e;
-      }
-    }
-
     const badge  = document.getElementById('badge');
     const viewer = document.querySelector('matterport-viewer');
 
-    // Diagnostics
+    // ---- SecurityCam scene component (plain inputs object) ----
+    function registerSecurityCam(sdk) {
+      try {
+        sdk.Scene.register('ark.securityCam', class extends sdk.Scene.Component {
+          onInit() {
+            // Plain object; no getters; no custom prototype.
+            this.inputs = {
+              color: 0x66ff99,
+              opacity: 0.35,
+              fov: 35,
+              showFrustum: true,
+              position: { x: 0, y: 1.6, z: 0 },
+              lookAt:   { x: 1, y: 1.6, z: 0 }
+            };
+
+            const THREE = this.context.three;
+
+            // Small marker
+            const markGeo = new THREE.SphereGeometry(0.06, 16, 12);
+            const markMat = new THREE.MeshBasicMaterial({ color: this.inputs.color, transparent:true, opacity:0.9 });
+            this._marker = new THREE.Mesh(markGeo, markMat);
+
+            // Frustum (wireframe cone)
+            const frustGeo = new THREE.ConeGeometry(0.35, 0.5, 24, 1, true);
+            const frustMat = new THREE.MeshBasicMaterial({
+              color: this.inputs.color, wireframe:true, transparent:true, opacity:this.inputs.opacity, depthWrite:false
+            });
+            this._frustum = new THREE.Mesh(frustGeo, frustMat);
+            this._frustum.rotation.x = -Math.PI / 2;
+
+            this._group = new THREE.Group();
+            this._group.add(this._marker, this._frustum);
+
+            this.context.scene.add(this._group);
+          }
+
+          onDestroy() {
+            this._group?.parent?.remove(this._group);
+            this._marker = this._frustum = this._group = null;
+          }
+
+          // (Very light reactive update; avoid fancy proxies)
+          onInputsUpdated(prev) {
+            if (!this._group) return;
+            const p = this.inputs.position, l = this.inputs.lookAt;
+            if (p) this._group.position.set(p.x, p.y, p.z);
+            if (l)  this._group.lookAt(l.x, l.y, l.z);
+          }
+        });
+      } catch (e) {
+        // ok on hot-reload; rethrow real errors
+        if (!/already registered/i.test(String(e?.message))) throw e;
+      }
+    }
+    // -----------------------------------------------------------
+
+    // Helpful diagnostics
     const log = (e) => console.log(`[${e.type}]`, e.detail ?? '');
     ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
       .forEach(t => viewer.addEventListener(t, log));
 
-    // SDK hook
+    // Init SDK + auto-add the camera
     viewer.addEventListener('mpSdkPlaying', async (evt) => {
       try {
         const sdk = evt.detail.mpSdk;
-
-        // Register the scene component
         registerSecurityCam(sdk);
 
-        // Create a node and attach the component — pass {} (CRUCIAL)
         const node = await sdk.Scene.createNode();
-        const comp = node.addComponent('ark.securityCam', {}); // <= fixes hasOwnProperty crash
 
-        // Seed initial position from the current camera pose
+        // CRUCIAL: pass a plain object
+        const comp = node.addComponent('ark.securityCam', {});
+
+        // Seed from current camera
         const pose = await sdk.Camera.getPose();
+        const fwd  = pose.forward;
         comp.inputs.position = { x: pose.position.x, y: pose.position.y, z: pose.position.z };
-        // Aim the lookAt forward from the current pose
-        comp.inputs.lookAt = {
-          x: pose.position.x + pose.forward.x,
-          y: pose.position.y + pose.forward.y,
-          z: pose.position.z + pose.forward.z
-        };
+        comp.inputs.lookAt   = { x: pose.position.x + fwd.x,
+                                 y: pose.position.y + fwd.y,
+                                 z: pose.position.z + fwd.z };
 
         node.start();
 
