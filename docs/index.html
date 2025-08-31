@@ -18,35 +18,90 @@
 
         const THREE = showcase.contentWindow.THREE;
 
+        mpSdk.Scene.register('custom.securityCamera', function () {
+          return {
+            name: 'custom.securityCamera',
+            inputs: {
+              visible: true,
+              fov: 90 * (Math.PI / 180), // Horizontal FOV in radians
+              aspect: 1.5, // Adjust for your cam (width/height)
+              range: 10, // Max range in meters
+            },
+            outputs: {},
+            onInit: function () {
+              const T = this.context.three;
+
+              this.group = new T.Group(); // Initialize this.group
+
+              this.yaw = new T.Group();
+              this.pitch = new T.Group();
+
+              this.group.add(this.yaw);
+              this.yaw.add(this.pitch);
+
+              // Build the frustum lines
+              this.lines = new T.LineSegments(
+                new T.BufferGeometry(),
+                new T.LineBasicMaterial({ color: 0xffff00, opacity: 0.5, transparent: true })
+              );
+              this.pitch.add(this.lines);
+
+              this._updateFrustum();
+
+              this.outputs.objectRoot = this.group; // Attach to outputs
+            },
+            onEvent: function (event) {
+              if (event === mpSdk.Scene.SceneEventType.UPDATE) {
+                this.lines.visible = this.inputs.visible;
+              }
+            },
+            onInputsUpdated: function () {
+              this._updateFrustum();
+            },
+            onDestroy: function () {
+              this.lines.geometry.dispose();
+              this.lines.material.dispose();
+            },
+            _updateFrustum: function () {
+              const fov = this.inputs.fov;
+              const aspect = this.inputs.aspect;
+              const range = this.inputs.range;
+
+              const halfFov = fov / 2;
+              const halfHeight = Math.tan(halfFov) * range;
+              const halfWidth = halfHeight * aspect;
+
+              const positions = new Float32Array([
+                0, 0, 0, -halfWidth, -halfHeight, -range,
+                0, 0, 0, -halfWidth, halfHeight, -range,
+                0, 0, 0, halfWidth, halfHeight, -range,
+                0, 0, 0, halfWidth, -halfHeight, -range,
+                -halfWidth, -halfHeight, -range, -halfWidth, halfHeight, -range,
+                -halfWidth, halfHeight, -range, halfWidth, halfHeight, -range,
+                halfWidth, halfHeight, -range, halfWidth, -halfHeight, -range,
+                halfWidth, -halfHeight, -range, -halfWidth, -halfHeight, -range,
+              ]);
+
+              this.lines.geometry.setAttribute('position', new T.BufferAttribute(positions, 3));
+            },
+          };
+        });
+
         const [sceneObject] = await mpSdk.Scene.createObjects(1);
         const node = sceneObject.addNode();
 
-        const radius = 5;
-        const height = 10;
-        const radialSegments = 32;
-        const heightSegments = 1;
+        node.addComponent('custom.securityCamera', {
+          visible: true,
+          fov: 90 * (Math.PI / 180),
+          aspect: 1.5,
+          range: 10
+        });
 
-        const geometry = new THREE.ConeGeometry(radius, height, radialSegments, heightSegments);
-        const material = new THREE.MeshBasicMaterial({ color: 0xffff00, opacity: 0.5, transparent: true, side: THREE.DoubleSide });
-
-        const mesh = new THREE.Mesh(geometry, material);
-
+        node.position.set(0, 1.5, 0);
+        node.rotation.set(THREE.MathUtils.degToRad(-90), 0, 0);
         node.start();
 
-        // Check if objectRoot is defined
-        if (node.objectRoot) {
-          node.objectRoot.add(mesh);
-        } else {
-          console.error('node.objectRoot is undefined');
-          return;
-        }
-
-        // Use object assignment to avoid 'set' method
-        mesh.position = { x: 0, y: 1.5, z: 0 };
-        mesh.rotation = { x: THREE.MathUtils.degToRad(-90), y: 0, z: 0 };
-        mesh.scale = { x: 1, y: 1, z: 1 };
-
-        console.log('FOV cone added!');
+        console.log('FOV frustum added!');
       } catch (e) {
         console.error('Error:', e);
       }
