@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ark – MP webcomponent (diag)</title>
+  <title>Ark – Matterport (Web Component)</title>
   <style>
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
@@ -12,14 +12,13 @@
       position:absolute; left:10px; top:10px; z-index:5;
       padding:6px 10px; font:12px system-ui;
       background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px;
-      user-select:none
     }
   </style>
 
   <!-- Local showcase CSS -->
   <link rel="stylesheet" href="./css/showcase.css" />
 
-  <!-- Import map (local ESM + local three) -->
+  <!-- Import map (valid JSON only; no trailing commas) -->
   <script type="importmap">
   {
     "imports": {
@@ -28,100 +27,119 @@
       "@matterport/webcomponent": "./vendors/matterport-webcomponent/0.1.45/matterport-viewer.esm.js"
     }
   }
+  </script>
+</head>
+<body>
+  <div class="badge" id="badge">loading…</div>
+
+  <matterport-viewer
+    m="1ghABoaBFPZ"
+    application-key="akqd0dp3hr9wz4eu70zd1rsab"
+    asset-base="/Ark"
+    play title="false" brand="false" style="outline:0">
+  </matterport-viewer>
+
   <script type="module">
-  import "@matterport/webcomponent";
+    import "@matterport/webcomponent";
 
-  // grab the viewer by tag (no id required)
-  const viewer = document.querySelector('matterport-viewer');
-  const badge  = document.getElementById('badge');
-  const set    = (t) => (badge.textContent = t);
+    const badge  = document.getElementById('badge');
+    const viewer = document.querySelector('matterport-viewer');
+    const set = (t) => badge.textContent = t;
 
-  // (optional) diagnostics so we know it's wired
-  ['mpReady','mpPlaying','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
-    .forEach(ev => viewer.addEventListener(ev, e => console.log(`[${ev}]`, e.detail ?? null)));
+    // Helpful diagnostics
+    ['mpReady','mpPlaying','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
+      .forEach(ev => viewer.addEventListener(ev, e => console.log(`[${ev}]`, e.detail ?? null)));
 
-  // add the camera once SDK is ready/playing
-  viewer.addEventListener('mpSdkPlaying', async (evt) => {
-    try {
-      const sdk = evt.detail.mpSdk;
-      set('SDK ✓ — adding cam');
+    // Add a tiny “security cam” gizmo when SDK is ready
+    viewer.addEventListener('mpSdkPlaying', async (evt) => {
+      try {
+        const sdk = evt.detail.mpSdk;
+        set('SDK ✓ — adding cam');
 
-      // Resolve a valid Scene.Component base across bundle variations
-      const tryBases = [sdk?.Scene?.Component, sdk?.Scene?.Component?.default].filter(Boolean);
-      let Base = null;
-      for (const C of tryBases) {
-        try { class T extends C {}; Base = C; break; } catch {}
+        // Resolve a valid Scene.Component base (handles default export variant)
+        const candidates = [sdk?.Scene?.Component, sdk?.Scene?.Component?.default].filter(Boolean);
+        let Base = null;
+        for (const C of candidates) {
+          try { class T extends C {}; Base = C; break; } catch {}
+        }
+        if (!Base) {
+          console.warn('No valid Scene.Component base found — cam disabled.');
+          set('SDK ✓ (cam disabled)');
+          return;
+        }
+
+        // Register a minimal, safe component
+        sdk.Scene.register('ark.securityCam', class extends Base {
+          onInit() {
+            this.inputs = {
+              color: 0x66ff99,
+              opacity: 0.6,
+              position: { x: 0, y: 1.6, z: 0 },
+              lookAt:   { x: 1, y: 1.6, z: 0 }
+            };
+
+            const THREE = this.context.three;
+
+            const marker = new THREE.Mesh(
+              new THREE.SphereGeometry(0.06, 16, 12),
+              new THREE.MeshBasicMaterial({ color: this.inputs.color, transparent:true, opacity:0.9 })
+            );
+
+            const wedge = new THREE.Mesh(
+              new THREE.ConeGeometry(0.25, 0.45, 20, 1, true),
+              new THREE.MeshBasicMaterial({
+                color: this.inputs.color, wireframe:true,
+                transparent:true, opacity:this.inputs.opacity, depthWrite:false
+              })
+            );
+            wedge.rotation.x = -Math.PI / 2;
+
+            this._group = new THREE.Group();
+            this._group.add(marker, wedge);
+            this.context.scene.add(this._group);
+          }
+
+          onInputsUpdated() {
+            if (!this._group) return;
+            const p = this.inputs.position, l = this.inputs.lookAt;
+            if (p) this._group.position.set(p.x, p.y, p.z);
+            if (l) this._group.lookAt(l.x, l.y, l.z);
+          }
+
+          onDestroy() {
+            this._group?.parent?.remove(this._group);
+            this._group = null;
+          }
+        });
+
+        // Place the cam at the current viewer pose
+        const pose = await sdk.Camera.getPose();
+        const node = await sdk.Scene.createNode();
+        const comp = node.addComponent('ark.securityCam', {});
+
+        comp.inputs.position = { ...pose.position };
+        const f = pose.forward;
+        comp.inputs.lookAt = {
+          x: pose.position.x + f.x,
+          y: pose.position.y + f.y,
+          z: pose.position.z + f.z
+        };
+
+        node.start();
+        set('SDK ✓ cam added');
+      } catch (err) {
+        console.error('SDK init error', err);
+        set('SDK init error (see console)');
       }
-      if (!Base) {
-        console.warn('No valid Scene.Component base found — cam disabled.');
-        set('SDK ✓ (cam disabled)');
-        return;
+    });
+
+    // If nothing happens, show a friendly nudge
+    setTimeout(() => {
+      if (badge.textContent.startsWith('loading')) {
+        console.warn('Viewer did not reach READY/PLAYING in time');
+        badge.textContent = 'still loading… (check console/network)';
       }
-
-      // Register a tiny, safe component
-      sdk.Scene.register('ark.securityCam', class extends Base {
-        onInit() {
-          this.inputs = {
-            color: 0x66ff99,
-            opacity: 0.6,
-            position: { x: 0, y: 1.6, z: 0 },
-            lookAt:   { x: 1, y: 1.6, z: 0 },
-          };
-
-          const THREE = this.context.three;
-
-          const marker = new THREE.Mesh(
-            new THREE.SphereGeometry(0.06, 16, 12),
-            new THREE.MeshBasicMaterial({ color: this.inputs.color, transparent: true, opacity: 0.9 })
-          );
-
-          const wedge = new THREE.Mesh(
-            new THREE.ConeGeometry(0.25, 0.45, 20, 1, true),
-            new THREE.MeshBasicMaterial({
-              color: this.inputs.color, wireframe: true,
-              transparent: true, opacity: this.inputs.opacity, depthWrite: false
-            })
-          );
-          wedge.rotation.x = -Math.PI / 2;
-
-          this._group = new THREE.Group();
-          this._group.add(marker, wedge);
-          this.context.scene.add(this._group);
-        }
-
-        onInputsUpdated() {
-          if (!this._group) return;
-          const p = this.inputs.position, l = this.inputs.lookAt;
-          if (p) this._group.position.set(p.x, p.y, p.z);
-          if (l) this._group.lookAt(l.x, l.y, l.z);
-        }
-
-        onDestroy() {
-          this._group?.parent?.remove(this._group);
-          this._group = null;
-        }
-      });
-
-      // Spawn one cam at the current viewer pose
-      const pose = await sdk.Camera.getPose();
-      const node = await sdk.Scene.createNode();
-      const comp = node.addComponent('ark.securityCam', {});
-
-      comp.inputs.position = { ...pose.position };
-      const f = pose.forward;
-      comp.inputs.lookAt = {
-        x: pose.position.x + f.x,
-        y: pose.position.y + f.y,
-        z: pose.position.z + f.z
-      };
-
-      node.start();
-      set('SDK ✓ cam added');
-    } catch (err) {
-      console.error('SDK init error', err);
-      set('SDK init error (see console)');
-    }
-  });
-</script>
+    }, 10000);
+  </script>
 </body>
 </html>
