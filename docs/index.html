@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ark – Matterport (Web Component)</title>
+  <title>Ark – Matterport (Sanity Check)</title>
   <style>
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
@@ -13,12 +13,13 @@
       padding:6px 10px; font:12px system-ui;
       background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px;
     }
+    .badge b { color:#9ff59f; }
   </style>
 
-  <!-- Local showcase CSS -->
+  <!-- Local showcase CSS (no CDN hits) -->
   <link rel="stylesheet" href="./css/showcase.css" />
 
-  <!-- Import map -->
+  <!-- Import map: local three + local webcomponent ESM -->
   <script type="importmap">
   {
     "imports": {
@@ -45,40 +46,101 @@
     const badge  = document.getElementById('badge');
     const viewer = document.querySelector('matterport-viewer');
 
-    // Diagnostics
+    // Basic diagnostics for the viewer itself
     const log = (e) => console.log(`[${e.type}]`, e.detail ?? '');
     ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
       .forEach(t => viewer.addEventListener(t, log));
 
-    // Init SDK + register/add a trivial component (debugging the hasOwnProperty error)
+    // ---- Helper: try to resolve a real Scene base class we can extend safely
+    function resolveBaseComponent(sdk) {
+      const scene = sdk?.Scene;
+      console.log('Scene typeof:', typeof scene);
+      if (!scene) return null;
+
+      try {
+        console.log('Scene keys:', Object.keys(scene));
+      } catch (_) {
+        // ignore if keys not enumerable
+      }
+
+      // 1) Common case: a function/class
+      if (typeof scene.Component === 'function') {
+        console.log('Resolved BaseComponent via Scene.Component (function).');
+        return scene.Component;
+      }
+
+      // 2) Some builds: module object with a default export
+      if (scene.Component && typeof scene.Component === 'object' && typeof scene.Component.default === 'function') {
+        console.log('Resolved BaseComponent via Scene.Component.default (function).');
+        return scene.Component.default;
+      }
+
+      // 3) Fallback: scan values to find a function that looks like a Component base
+      try {
+        const candidates = Object.entries(scene)
+          .filter(([k, v]) => typeof v === 'function')
+          .map(([k, v]) => ({ name:k, ctor:v }));
+
+        console.log('Function candidates in Scene:', candidates.map(c => c.name));
+
+        // Heuristic: look for something whose prototype has lifecycle-ish members or inputs
+        const picked = candidates.find(c => {
+          const p = c.ctor?.prototype ?? {};
+          return ('onInit' in p) || ('onDestroy' in p) || ('onInputsUpdated' in p);
+        });
+
+        if (picked) {
+          console.log('Resolved BaseComponent via heuristic:', picked.name);
+          return picked.ctor;
+        }
+      } catch (e) {
+        console.warn('Heuristic scan failed:', e);
+      }
+
+      console.warn('Could not resolve a valid Component base class.');
+      return null;
+    }
+
+    // ---- Main: try to register a minimal component only if safe
     viewer.addEventListener('mpSdkPlaying', async (evt) => {
-  try {
-    const sdk = evt.detail.mpSdk;
+      try {
+        const sdk = evt.detail.mpSdk;
 
-    // In some bundles Scene.Component is a module object with a `default`
-       console.log('Scene.Component typeof:', typeof sdk.Scene.Component, sdk.Scene.Component);
-       const BaseComponent =
-      (sdk.Scene.Component && typeof sdk.Scene.Component === 'object' && 'default' in sdk.Scene.Component)
-        ? sdk.Scene.Component.default
-        : sdk.Scene.Component;
+        // Introspect first
+        const BaseComponent = resolveBaseComponent(sdk);
+        console.log('Final BaseComponent typeof:', typeof BaseComponent);
 
-    // Register a minimal dummy component (plain inputs)
-    sdk.Scene.register('x.dummy', class extends BaseComponent {
-      onInit() { this.inputs = {}; }  // keep inputs as a plain object
+        if (BaseComponent) {
+          // Guard double-register on hot reload
+          try {
+            sdk.Scene.register('x.dummy', class extends BaseComponent {
+              onInit() {
+                // Keep inputs as a literal plain object (no getters/proxies)
+                this.inputs = {};
+              }
+            });
+            console.log('Registered x.dummy successfully.');
+          } catch (e) {
+            if (!/already registered/i.test(String(e?.message))) throw e;
+            console.log('x.dummy already registered (ok).');
+          }
+
+          // Attach it with a literal {} to avoid proxy traps
+          const node = await sdk.Scene.createNode();
+          node.addComponent('x.dummy', {});
+          node.start();
+          console.log('Created node and added x.dummy with {} inputs.');
+        } else {
+          console.warn('Skipping registration because no valid BaseComponent was found.');
+        }
+
+        const info = await sdk.Model.getData();
+        badge.innerHTML = `<b>SDK connected</b> — model: ${info.sid}`;
+      } catch (err) {
+        console.error('SDK init error', err);
+        badge.textContent = 'SDK init error (see console)';
+      }
     });
-
-    // Create a node and attach the component — pass a plain {} to avoid proxy traps
-    const node = await sdk.Scene.createNode();
-    node.addComponent('x.dummy', {});   // important: a literal plain object
-    node.start();
-
-    const info = await sdk.Model.getData();
-    badge.textContent = `SDK connected — model: ${info.sid}`;
-  } catch (err) {
-    console.error('SDK init error', err);
-    badge.textContent = 'SDK init error (see console)';
-  }
-});
 
     // Timeout notice if nothing happens
     setTimeout(() => {
