@@ -8,9 +8,11 @@
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
     matterport-viewer { display:block; inline-size:100%; block-size:100dvh; }
-    .badge { position:absolute; left:10px; top:10px; z-index:5;
+    .badge {
+      position:absolute; left:10px; top:10px; z-index:5;
       padding:6px 10px; font:12px system-ui;
-      background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px; }
+      background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px;
+    }
   </style>
 </head>
 <body>
@@ -23,9 +25,8 @@
     play title="false" brand="false" style="outline:0">
   </matterport-viewer>
 
-  <!-- Your app code -->
   <script type="module">
-    // ---------- robust loader for THREE + webcomponent (LOCAL → CDN fallback) ----------
+    // -------- load ONLY the Matterport web component (LOCAL → CDN fallbacks) --------
     const badge  = document.getElementById("badge");
     const viewer = document.querySelector("matterport-viewer");
 
@@ -33,42 +34,33 @@
       return new Promise((resolve, reject) => {
         const s = document.createElement("script");
         s.src = url;
-        s.async = false; // keep order
+        s.async = false;
         s.onload = () => resolve(url);
         s.onerror = () => reject(new Error("load failed: " + url));
         document.head.appendChild(s);
       });
     }
-
     async function tryLoad(urls, name) {
       for (const u of urls) {
-        try { const ok = await loadScript(u); console.log(`[loader] ${name}:`, ok); return; }
-        catch (e) { console.warn(`[loader] ${name} failed:`, u); }
+        try { await loadScript(u); console.log(`[loader] ${name}:`, u); return; }
+        catch { console.warn(`[loader] ${name} failed:`, u); }
       }
       throw new Error(`${name}: all sources failed`);
     }
 
-    // LOCAL first, then CDN fallbacks
-    const THREE_URLS = [
-      "./vendors/three/0.176.0/three.js",                          // <- your local file
-      "https://cdn.jsdelivr.net/npm/three@0.176.0/build/three.min.js",
-      "https://unpkg.com/three@0.176.0/build/three.min.js",
-    ];
-
     const WC_URLS = [
-      "./vendors/matterport-webcomponent/0.1.45/webcomponent.js",  // <- your local file (copied UMD)
+      "./vendors/matterport-webcomponent/0.1.45/webcomponent.js",
       "https://cdn.jsdelivr.net/npm/@matterport/webcomponent@0.1.45/dist/webcomponent.js",
       "https://unpkg.com/@matterport/webcomponent@0.1.45/dist/webcomponent.js",
     ];
 
     try {
-      await tryLoad(THREE_URLS, "THREE");          // three UMD sets window.THREE
-      await tryLoad(WC_URLS, "webcomponent");      // custom element upgrades itself
+      await tryLoad(WC_URLS, "webcomponent");
 
       // ---------- SDK logic ----------
       viewer.addEventListener("mpSdkPlaying", async (evt) => {
         try {
-          const sdk = evt.detail.mpSdk;
+          const sdk  = evt.detail.mpSdk;
           const info = await sdk.Model.getData();
           badge.textContent = `SDK connected — model: ${info.sid}`;
           console.log("pose", await sdk.Camera.getPose());
@@ -90,7 +82,7 @@
                 this._t = 0;
               }
               onInit() {
-                const T = this.context.three;
+                const T = this.context.three; // provided by SDK – no global THREE needed
                 this.root  = new T.Group();
                 this.yaw   = new T.Group();
                 this.pitch = new T.Group();
@@ -103,28 +95,34 @@
                 this.lineMat = new T.LineBasicMaterial({
                   color: this.inputs.color, transparent: true, opacity: this.inputs.wireOpacity
                 });
+
                 this._buildFrustum();
                 this._applyTransform();
                 this.outputs.objectRoot = this.root;
               }
               _buildFrustum() {
-                const T = this.context.three;
+                const T=this.context.three;
                 const n=this.inputs.near, f=this.inputs.far;
                 const hf=T.MathUtils.degToRad(this.inputs.hfovDeg);
                 const a=this.inputs.aspect, vf=2*Math.atan(Math.tan(hf/2)/a);
                 const nw=Math.tan(hf/2)*n, nh=Math.tan(vf/2)*n;
                 const fw=Math.tan(hf/2)*f, fh=Math.tan(vf/2)*f;
+
                 const V=[[-nw,nh,-n],[nw,nh,-n],[nw,-nh,-n],[-nw,-nh,-n],
                          [-fw,fh,-f],[fw,fh,-f],[fw,-fh,-f],[-fw,-fh,-f]];
                 const idx=[0,1,2,0,2,3,4,6,5,4,7,6,0,4,5,0,5,1,1,5,6,1,6,2,2,6,7,2,7,3,3,7,4,3,4,0];
+
                 const pos=new Float32Array(idx.length*3);
                 for(let i=0;i<idx.length;i++){const p=V[idx[i]];pos[i*3]=p[0];pos[i*3+1]=p[1];pos[i*3+2]=p[2];}
                 const g=new T.BufferGeometry(); g.setAttribute("position", new T.BufferAttribute(pos,3));
+
                 const ep=[0,1,1,2,2,3,3,0,4,5,5,6,6,7,7,4,0,4,1,5,2,6,3,7];
                 const epos=new Float32Array(ep.length*3);
                 for(let i=0;i<ep.length;i++){const p=V[ep[i]];epos[i*3]=p[0];epos[i*3+1]=p[1];epos[i*3+2]=p[2];}
                 const eg=new T.BufferGeometry(); eg.setAttribute("position", new T.BufferAttribute(epos,3));
-                if(!this.mesh){const T3=this.context.three;
+
+                if(!this.mesh){
+                  const T3=this.context.three;
                   this.mesh=new T3.Mesh(g,this.material);
                   this.wire=new T3.LineSegments(eg,this.lineMat);
                   this.pitch.add(this.mesh,this.wire);
@@ -135,15 +133,25 @@
               }
               _applyTransform() {
                 const T=this.context.three;
-                this.root.position.set(this.inputs.worldPosition.x,this.inputs.worldPosition.y,this.inputs.worldPosition.z);
+                this.root.position.set(
+                  this.inputs.worldPosition.x,
+                  this.inputs.worldPosition.y,
+                  this.inputs.worldPosition.z
+                );
                 if(this.inputs.worldRotationQuat && "x" in this.inputs.worldRotationQuat){
                   const q=this.inputs.worldRotationQuat;
                   this.root.quaternion.set(q.x,q.y,q.z,q.w);
                 } else {
                   const e=this.inputs.worldEulerDeg;
-                  this.root.rotation.set(T.MathUtils.degToRad(e.x||0),T.MathUtils.degToRad(e.y||0),T.MathUtils.degToRad(e.z||0),"YXZ");
+                  this.root.rotation.set(
+                    T.MathUtils.degToRad(e.x||0),
+                    T.MathUtils.degToRad(e.y||0),
+                    T.MathUtils.degToRad(e.z||0),
+                    "YXZ"
+                  );
                 }
-                this.yaw.rotation.set(0,0,0); this.pitch.rotation.set(0,0,0);
+                this.yaw.rotation.set(0,0,0);
+                this.pitch.rotation.set(0,0,0);
               }
               onInputsChanged(changed){
                 if(changed.near||changed.far||changed.hfovDeg||changed.aspect) this._buildFrustum();
@@ -151,14 +159,14 @@
               }
               onTick(dt){
                 if(!this.inputs.panEnabled) return;
-                const T=this.context.three, amp=T.MathUtils.degToRad(this.inputs.panAngleDeg||60);
+                const T=this.context.three;
+                const amp=T.MathUtils.degToRad(this.inputs.panAngleDeg||60);
                 const omega=(2*Math.PI)/(this.inputs.panPeriodSec||8);
                 this.yaw.rotation.y=Math.sin((this._t+=dt)*omega)*amp;
               }
             };
           });
 
-          // Add one camera at the viewer's pose
           async function addCamAtViewer(hfov=90){
             const pose = await sdk.Camera.getPose();
             const node = await sdk.Scene.createNode();
@@ -183,7 +191,7 @@
       });
     } catch (e) {
       console.error(e);
-      badge.textContent = "Failed to load viewer libraries (CDN blocked?)";
+      badge.textContent = "Failed to load viewer libraries";
     }
   </script>
 </body>
