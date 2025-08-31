@@ -25,7 +25,7 @@
 
   <!-- Your app code -->
   <script type="module">
-    // ---------- robust loader for THREE + webcomponent ----------
+    // ---------- robust loader for THREE + webcomponent (LOCAL → CDN fallback) ----------
     const badge  = document.getElementById("badge");
     const viewer = document.querySelector("matterport-viewer");
 
@@ -48,25 +48,22 @@
       throw new Error(`${name}: all sources failed`);
     }
 
-    // Primary → secondary CDN → (optional) local vendor copy
+    // LOCAL first, then CDN fallbacks
     const THREE_URLS = [
+      "./vendors/three/0.176.0/build/three.min.js",
       "https://cdn.jsdelivr.net/npm/three@0.176.0/build/three.min.js",
       "https://unpkg.com/three@0.176.0/build/three.min.js",
-      // add this if you later commit a copy: "/Ark/vendors/three/0.176.0/three.min.js",
     ];
 
     const WC_URLS = [
+      "./vendors/matterport-webcomponent/0.1.45/webcomponent.js",
       "https://cdn.jsdelivr.net/npm/@matterport/webcomponent@0.1.45/dist/webcomponent.js",
       "https://unpkg.com/@matterport/webcomponent@0.1.45/dist/webcomponent.js",
-      // add this if you later commit a copy: "/Ark/vendors/matterport-webcomponent/0.1.45/webcomponent.js",
     ];
 
     try {
-      await tryLoad(THREE_URLS, "THREE");
-      // three UMD sets window.THREE; nothing else to do.
-
-      await tryLoad(WC_URLS, "webcomponent");
-      // custom element upgrades itself once the script is loaded.
+      await tryLoad(THREE_URLS, "THREE");          // three UMD sets window.THREE
+      await tryLoad(WC_URLS, "webcomponent");      // custom element upgrades itself
 
       // ---------- SDK logic ----------
       viewer.addEventListener("mpSdkPlaying", async (evt) => {
