@@ -3,67 +3,80 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ark – Security Cam</title>
+  <title>Ark – MP webcomponent (diag)</title>
   <style>
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
     matterport-viewer { display:block; inline-size:100%; block-size:100dvh; }
-    .badge{
+    .badge {
       position:absolute; left:10px; top:10px; z-index:5;
       padding:6px 10px; font:12px system-ui;
       background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px;
+      user-select:none
     }
   </style>
-  <link rel="stylesheet" href="./css/showcase.css">
+
+  <!-- Local showcase CSS -->
+  <link rel="stylesheet" href="./css/showcase.css" />
+
+  <!-- Import map (local ESM + local three) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendors/three/0.176.0/build/three.module.js",
+      "three/addons/": "./vendors/three/0.176.0/examples/jsm/",
+      "@matterport/webcomponent": "./vendors/matterport-webcomponent/0.1.45/matterport-viewer.esm.js"
+    }
+  }
+  </script>
 </head>
 <body>
-  <div class="badge" id="badge">loading…</div>
+  <div class="badge" id="badge">booting…</div>
 
-  <matterport-viewer
+  <matterport-viewer id="mp"
     m="1ghABoaBFPZ"
     application-key="akqd0dp3hr9wz4eu70zd1rsab"
     asset-base="/Ark"
     play
-    title="false"
-    brand="false"
-    style="outline:0">
+    title="false" brand="false" style="outline:0">
   </matterport-viewer>
 
-  <!-- UMD viewer (must NOT be the ESM file) -->
-  <script src="./vendors/matterport-webcomponent/0.1.45/webcomponent.js"></script>
+  <script type="module">
+    import "@matterport/webcomponent";
 
-  <script>
-  const badge  = document.getElementById('badge');
-  const viewer = document.querySelector('matterport-viewer');
+    const el = document.getElementById('mp');
+    const badge = document.getElementById('badge');
+    const set = (t) => badge.textContent = t;
 
-  let ready = false;
-  let playing = false;
+    // Verbose event logging (no timeouts)
+    const events = [
+      'mpReady','mpPlaying','mpPaused','mpProgress',
+      'mpCameraAvailable','mpNavigationChanged',
+      'mpError','mpSdkError'
+    ];
+    events.forEach(ev => el.addEventListener(ev, e => {
+      console.log(`[${ev}]`, e.detail ?? null);
+      if (ev === 'mpProgress') {
+        const p = (e.detail?.progress ?? 0) * 100;
+        set(`loading ${Math.round(p)}%`);
+      }
+      if (ev === 'mpReady') set('ready…');
+      if (ev === 'mpPlaying') set('playing');
+      if (ev === 'mpPaused') set('paused');
+      if (ev === 'mpError' || ev === 'mpSdkError') set('error — see console');
+    }));
 
-  // show progress in the badge
-  viewer.addEventListener('mpProgress', (e) => {
-    const p = Math.round((e.detail?.percent ?? 0) * 100);
-    if (!playing) badge.textContent = `loading… ${p}%`;
-  });
-
-  viewer.addEventListener('mpReady', () => {
-    ready = true;
-    if (!playing) badge.textContent = 'model loaded — starting…';
-  });
-
-  // your existing mpSdkPlaying handler…
-  viewer.addEventListener('mpSdkPlaying', async (evt) => {
-    playing = true;
-    clearTimeout(watchdog);
-    // ... (rest of your SDK code here)
-  });
-
-  // Watchdog: only warn if *neither* ready nor playing after 30s
-  const watchdog = setTimeout(() => {
-    if (!ready && !playing) {
-      console.warn('Viewer did not reach READY/PLAYING in time');
-      badge.textContent = 'still loading… (check console/network)';
-    }
-  }, 30000);
-</script>
+    el.addEventListener('mpSdkPlaying', async (e) => {
+      try {
+        const sdk = e.detail.mpSdk;
+        set('SDK connected — fetching model…');
+        const info = await sdk.Model.getData();
+        set(`SDK ✓ model: ${info.sid}`);
+      } catch (err) {
+        console.error(err);
+        set('SDK model error (see console)');
+      }
+    });
+  </script>
 </body>
 </html>
