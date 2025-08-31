@@ -40,122 +40,74 @@
   </matterport-viewer>
 
   <script type="module">
-    import "@matterport/webcomponent";
+  import "@matterport/webcomponent";
 
-    const badge  = document.getElementById('badge');
-    const viewer = document.querySelector('matterport-viewer');
-    const set = (t) => (badge.textContent = t);
+  const badge  = document.getElementById('badge');
+  const viewer = document.querySelector('matterport-viewer');
+  const set = (t) => (badge.textContent = t);
 
-    // Helpful diagnostics
-    ['mpReady','mpPlaying','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
-      .forEach(ev => viewer.addEventListener(ev, e => console.log(`[${ev}]`, e.detail ?? null)));
+  // Diagnostics
+  ['mpReady','mpPlaying','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
+    .forEach(ev => viewer.addEventListener(ev, e => console.log(`[${ev}]`, e.detail ?? null)));
 
-    // Utility: safe check for a constructable base class
-    function isConstructable(fn) {
+  viewer.addEventListener('mpSdkPlaying', async (evt) => {
+    const sdk = evt.detail?.mpSdk;
+    if (!sdk) { set('SDK missing'); return; }
+
+    set('SDK ✓ — loading plugin');
+
+    // Robust path to our plugin file under /docs/plugins/
+    const pluginUrl = new URL('./plugins/ark-security-cam.js', import.meta.url).href;
+    console.log('Loading plugin from', pluginUrl);
+
+    try {
+      if (sdk.Plugin?.register) {
+        // Modern flow: tell the viewer to import our ESM plugin,
+        // then enable it. (Both calls occur inside the viewer realm.)
+        await sdk.Plugin.register('ark.securityCam', pluginUrl);
+        if (sdk.Plugin?.enable) {
+          await sdk.Plugin.enable('ark.securityCam');
+        }
+        set('SDK ✓ cam plugin enabled');
+        console.log('ark.securityCam plugin enabled');
+        return; // success path
+      }
+
+      // Older flow on some builds: App.loadPlugin(url) auto-enables
+      if (sdk.App?.loadPlugin) {
+        await sdk.App.loadPlugin(pluginUrl);
+        set('SDK ✓ cam plugin (App.loadPlugin)');
+        console.log('ark.securityCam loaded via App.loadPlugin');
+        return;
+      }
+
+      throw new Error('No Plugin.register/App.loadPlugin available on this SDK');
+    } catch (err) {
+      console.warn('Plugin path failed, using Tag fallback.', err);
       try {
-        // Will throw if not a constructor / not extendable across realms
-        // eslint-disable-next-line no-new-func
-        class T extends fn {}
-        return true;
-      } catch { return false; }
+        const pose = await sdk.Camera.getPose();
+        // Use modern API (Tag.add) to avoid deprecation warnings
+        await sdk.Tag.add([{
+          label: 'Cam',
+          description: 'Fallback marker (Scene.Component unavailable in host)',
+          anchorPosition: pose.position,
+          stemVector: { x: 0, y: 0.2, z: 0 }
+        }]);
+        set('SDK ✓ tag added (fallback)');
+      } catch (e2) {
+        set('SDK init error (see console)');
+        console.error('Fallback failed:', e2);
+      }
     }
+  });
 
-    // Main
-    viewer.addEventListener('mpSdkPlaying', async (evt) => {
-      const sdk = evt.detail?.mpSdk;
-      if (!sdk) { set('SDK missing'); return; }
-
-      set('SDK ✓ — probing Scene');
-      console.log('sdk keys:', Object.keys(sdk));
-      console.log('sdk.Scene keys:', sdk.Scene ? Object.keys(sdk.Scene) : '(none)');
-      console.log('typeof sdk.Scene.register:', typeof sdk.Scene?.register);
-      console.log('sdk.Scene.Component:', sdk.Scene?.Component);
-
-      // Try the normal Scene.Component subclass path
-      let added = false;
-      const Base = sdk?.Scene?.Component;
-      const canSubclass = Base && isConstructable(Base);
-
-      if (canSubclass && typeof sdk.Scene.register === 'function') {
-        try {
-          sdk.Scene.register('ark.securityCam', class extends Base {
-            onInit() {
-              this.inputs = {
-                color: 0x66ff99,
-                opacity: 0.6,
-                position: { x: 0, y: 1.6, z: 0 },
-                lookAt:   { x: 1, y: 1.6, z: 0 }
-              };
-              const THREE = this.context.three;
-
-              const marker = new THREE.Mesh(
-                new THREE.SphereGeometry(0.06, 16, 12),
-                new THREE.MeshBasicMaterial({ color: this.inputs.color, transparent:true, opacity:0.9 })
-              );
-
-              const wedge = new THREE.Mesh(
-                new THREE.ConeGeometry(0.25, 0.45, 20, 1, true),
-                new THREE.MeshBasicMaterial({ color: this.inputs.color, wireframe:true, transparent:true, opacity:this.inputs.opacity, depthWrite:false })
-              );
-              wedge.rotation.x = -Math.PI / 2;
-
-              this._group = new THREE.Group();
-              this._group.add(marker, wedge);
-              this.context.scene.add(this._group);
-            }
-            onInputsUpdated() {
-              if (!this._group) return;
-              const p = this.inputs.position, l = this.inputs.lookAt;
-              if (p) this._group.position.set(p.x, p.y, p.z);
-              if (l) this._group.lookAt(l.x, l.y, l.z);
-            }
-            onDestroy() {
-              this._group?.parent?.remove(this._group);
-              this._group = null;
-            }
-          });
-
-          const pose = await sdk.Camera.getPose();
-          const node = await sdk.Scene.createNode();
-          const comp = node.addComponent('ark.securityCam', {});
-          comp.inputs.position = { ...pose.position };
-          const f = pose.forward;
-          comp.inputs.lookAt = { x: pose.position.x + f.x, y: pose.position.y + f.y, z: pose.position.z + f.z };
-          node.start();
-
-          set('SDK ✓ cam added');
-          added = true;
-        } catch (err) {
-          console.warn('Scene.Component path failed, will try fallback.', err);
-        }
-      }
-
-      // Fallback: drop a Mattertag where the camera is (works without Scene.Component)
-      if (!added) {
-        try {
-          const pose = await sdk.Camera.getPose();
-          await sdk.Mattertag.add([{
-            label: 'Cam',
-            description: 'Fallback marker (Scene.Component unavailable)',
-            anchorPosition: pose.position,
-            stemVector: { x: 0, y: 0.2, z: 0 }
-          }]);
-          set('SDK ✓ tag added (fallback)');
-          console.warn('No constructable Scene.Component; used Mattertag fallback.');
-        } catch (err) {
-          set('SDK init error (see console)');
-          console.error('Fallback Mattertag failed:', err);
-        }
-      }
-    });
-
-    // If nothing happens, show a friendly nudge
-    setTimeout(() => {
-      if (badge.textContent.startsWith('loading')) {
-        console.warn('Viewer did not reach READY/PLAYING in time');
-        badge.textContent = 'still loading… (check console/network)';
-      }
-    }, 10000);
-  </script>
+  // Nudge if viewer never transitions
+  setTimeout(() => {
+    if (badge.textContent.startsWith('loading')) {
+      console.warn('Viewer did not reach READY/PLAYING in time');
+      badge.textContent = 'still loading… (check console/network)';
+    }
+  }, 10000);
+</script>
 </body>
 </html>
