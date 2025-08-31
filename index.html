@@ -16,9 +16,6 @@
         const mpSdk = await showcase.contentWindow.MP_SDK.connect(showcase.contentWindow);
         console.log('SDK Connected:', mpSdk);
 
-        // Log Mattertags to get positions
-        mpSdk.Tag.getData().then(tags => console.log('Mattertags:', tags));
-
         const THREE = showcase.contentWindow.THREE;
 
         const [sceneObject] = await mpSdk.Scene.createObjects(1);
