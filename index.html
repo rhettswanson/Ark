@@ -19,7 +19,7 @@
          const [sceneObject] = await mpSdk.Scene.createObjects(1);
          const node = sceneObject.addNode();
 
-         const THREE = sceneObject.context.three;
+         const THREE = showcase.contentWindow.THREE;
 
          const radius = 5;  // Base radius of the cone
          const height = 10; // Length/depth of the FOV cone
