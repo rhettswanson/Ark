@@ -15,22 +15,21 @@
     }
   </style>
 
-  <!-- Local showcase CSS so we don't hit the CDN -->
+  <!-- Local Showcase CSS (and you already host the fonts), avoiding CDN -->
   <link rel="stylesheet" href="./vendors/matterport-webcomponent/0.1.45/css/showcase.css">
 </head>
 <body>
   <div class="badge" id="badge">loading…</div>
 
-  <!-- Keep it minimal: NO asset-base, NO title/brand -->
+  <!-- Minimal embed: drive the component with an explicit Showcase URL -->
   <matterport-viewer
-  m="1ghABoaBFPZ"
-  application-key="akqd0dp3hr9wz4eu70zd1rsab"
-  asset-base="/Ark"
-  play title="false" brand="false" style="outline:0">
-</matterport-viewer>
+    id="mp"
+    src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1&brand=0&title=0&applicationKey=akqd0dp3hr9wz4eu70zd1rsab"
+    style="outline:0; display:block; inline-size:100%; block-size:100dvh;">
+  </matterport-viewer>
 
   <script type="module">
-    // Load the Matterport web component (local copy you staged)
+    // Load the Matterport web component (local first, CDN fallback)
     const loadScript = (url) => new Promise((res, rej) => {
       const s = document.createElement('script'); s.src = url; s.async = false;
       s.onload = () => res(url); s.onerror = () => rej(new Error('failed: ' + url));
@@ -43,22 +42,21 @@
       'https://unpkg.com/@matterport/webcomponent@0.1.45/dist/webcomponent.js',
     ];
 
-    const badge = document.getElementById('badge');
+    const badge  = document.getElementById('badge');
     const viewer = document.querySelector('matterport-viewer');
 
     (async () => {
-      // try local first, then CDN fallback just in case
       for (const u of WC_URLS) {
         try { await loadScript(u); console.log('[loader] webcomponent:', u); break; }
         catch (e) { console.warn('[loader] failed:', u); }
       }
 
-      // --- Diagnostics: log every useful event ---
+      // Diagnostics: log useful events
       const log = (evt) => console.log(`[${evt.type}]`, evt.detail ?? '');
-      ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged',
-       'mpError','mpSdkError'].forEach(t => viewer.addEventListener(t, log));
+      ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
+        .forEach(t => viewer.addEventListener(t, log));
 
-      // SDK “playing” gives us the mpSdk instance
+      // When SDK is ready, show some info
       viewer.addEventListener('mpSdkPlaying', async (evt) => {
         try {
           const sdk = evt.detail.mpSdk;
@@ -71,7 +69,7 @@
         }
       });
 
-      // If nothing happens for a while, tell us
+      // If nothing happens for a while, nudge us to check network
       setTimeout(() => {
         if (badge.textContent.startsWith('loading')) {
           console.warn('Viewer did not reach READY/PLAYING in time');
