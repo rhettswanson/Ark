@@ -42,41 +42,128 @@
   </matterport-viewer>
 
   <script type="module">
-    import "@matterport/webcomponent";
+  import "@matterport/webcomponent";
 
-    const el = document.getElementById('mp');
-    const badge = document.getElementById('badge');
-    const set = (t) => badge.textContent = t;
+  const el = document.getElementById('mp');
+  const badge = document.getElementById('badge');
+  const set   = (t) => badge.textContent = t;
 
-    // Verbose event logging (no timeouts)
-    const events = [
-      'mpReady','mpPlaying','mpPaused','mpProgress',
-      'mpCameraAvailable','mpNavigationChanged',
-      'mpError','mpSdkError'
-    ];
-    events.forEach(ev => el.addEventListener(ev, e => {
-      console.log(`[${ev}]`, e.detail ?? null);
-      if (ev === 'mpProgress') {
-        const p = (e.detail?.progress ?? 0) * 100;
-        set(`loading ${Math.round(p)}%`);
+  // Verbose viewer diagnostics (keep)
+  ['mpReady','mpPlaying','mpPaused','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
+    .forEach(ev => el.addEventListener(ev, e => console.log(`[${ev}]`, e.detail ?? null)));
+
+  // ---------- CAM ADDER ----------
+  el.addEventListener('mpSdkPlaying', async (e) => {
+    try {
+      const sdk = e.detail.mpSdk;
+      set('SDK connected — setting up cam…');
+
+      // 1) Find a working Base Component class in this runtime
+      function resolveBaseComponent() {
+        const candidates = [
+          sdk?.Scene?.Component,
+          sdk?.Scene?.Component?.default,
+        ].filter(Boolean);
+
+        for (const c of candidates) {
+          try {
+            // If we can subclass it, it's the right thing.
+            // eslint-disable-next-line no-new-func
+            class Test extends c {}
+            return c;
+          } catch (_) { /* keep trying */ }
+        }
+        return null;
       }
-      if (ev === 'mpReady') set('ready…');
-      if (ev === 'mpPlaying') set('playing');
-      if (ev === 'mpPaused') set('paused');
-      if (ev === 'mpError' || ev === 'mpSdkError') set('error — see console');
-    }));
 
-    el.addEventListener('mpSdkPlaying', async (e) => {
-      try {
-        const sdk = e.detail.mpSdk;
-        set('SDK connected — fetching model…');
-        const info = await sdk.Model.getData();
-        set(`SDK ✓ model: ${info.sid}`);
-      } catch (err) {
-        console.error(err);
-        set('SDK model error (see console)');
+      const Base = resolveBaseComponent();
+      if (!Base) {
+        console.warn('No valid Scene.Component base found — Security Cam disabled.');
+        set('SDK ✓ (no scene base class; cam disabled)');
+        return;
       }
-    });
-  </script>
+
+      // 2) Register a minimal, safe component
+      sdk.Scene.register('ark.securityCam', class extends Base {
+        onInit() {
+          // keep inputs as a plain object (no proxies)
+          this.inputs = {
+            color: 0x66ff99,
+            opacity: 0.6,
+            showFrustum: true,
+            position: { x: 0, y: 1.6, z: 0 },
+            lookAt:   { x: 1, y: 1.6, z: 0 },
+          };
+
+          // pull THREE from the scene context
+          const THREE = this.context.three;
+
+          // a tiny marker sphere
+          const markGeo = new THREE.SphereGeometry(0.06, 16, 12);
+          const markMat = new THREE.MeshBasicMaterial({
+            color: this.inputs.color, transparent: true, opacity: 0.9
+          });
+          this._marker = new THREE.Mesh(markGeo, markMat);
+
+          // a thin wedge hint for facing
+          const frustGeo = new THREE.ConeGeometry(0.25, 0.45, 20, 1, true);
+          const frustMat = new THREE.MeshBasicMaterial({
+            color: this.inputs.color, wireframe: true,
+            transparent: true, opacity: this.inputs.opacity, depthWrite: false
+          });
+          this._frustum = new THREE.Mesh(frustGeo, frustMat);
+          this._frustum.rotation.x = -Math.PI / 2;
+
+          this._group = new THREE.Group();
+          this._group.add(this._marker, this._frustum);
+
+          this.context.scene.add(this._group);
+        }
+
+        onDestroy() {
+          this._group?.parent?.remove(this._group);
+          this._marker = this._frustum = this._group = null;
+        }
+
+        onInputsUpdated() {
+          if (!this._group) return;
+          const p = this.inputs.position, l = this.inputs.lookAt;
+          if (p) this._group.position.set(p.x, p.y, p.z);
+          if (l) this._group.lookAt(l.x, l.y, l.z);
+        }
+      });
+
+      // 3) Spawn one cam at current camera pose
+      const pose = await sdk.Camera.getPose(); // { position, rotation, ... }
+
+      const node = await sdk.Scene.createNode();
+      const comp = node.addComponent('ark.securityCam', {});
+
+      // set position from the current camera
+      comp.inputs.position = {
+        x: pose.position.x,
+        y: pose.position.y,
+        z: pose.position.z
+      };
+
+      // set a lookAt one meter forward from camera
+      const fwd = pose.forward; // normalized
+      comp.inputs.lookAt = {
+        x: pose.position.x + fwd.x,
+        y: pose.position.y + fwd.y,
+        z: pose.position.z + fwd.z
+      };
+
+      node.start();
+
+      set('SDK ✓ security cam added');
+
+    } catch (err) {
+      console.error('SDK init error', err);
+      set('SDK init error (see console)');
+    }
+  });
+  // ---------- /CAM ADDER ----------
+</script>
 </body>
 </html>
