@@ -1,1 +1,1 @@
-Couldn't find the requested file /build/three.min.js in three.
+Not found: /three@0.176.0/build/three.min.js
