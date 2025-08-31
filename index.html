@@ -8,44 +8,77 @@
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
     matterport-viewer { display:block; inline-size:100%; block-size:100dvh; }
-    .badge { position:absolute; left:10px; top:10px; z-index:5;
+    .badge {
+      position: absolute; left:10px; top:10px; z-index:5;
       padding:6px 10px; font:12px system-ui;
-      background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px; }
+      background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px;
+    }
   </style>
+
+  <!-- Local showcase CSS so we don't hit the CDN -->
+  <link rel="stylesheet" href="./vendors/matterport-webcomponent/0.1.45/css/showcase.css">
 </head>
 <body>
   <div class="badge" id="badge">loading…</div>
 
+  <!-- Keep it minimal: NO asset-base, NO title/brand -->
   <matterport-viewer
     m="1ghABoaBFPZ"
     application-key="akqd0dp3hr9wz4eu70zd1rsab"
-    asset-base="/Ark/mp-assets"
     play
-    title="false"
-    brand="false"
-    style="outline:0"
-  ></matterport-viewer>
+    style="outline:0">
+  </matterport-viewer>
 
   <script type="module">
-    import "https://esm.sh/@matterport/webcomponent@0.1.45?deps=three@0.176.0";
-    const badge = document.getElementById("badge");
-    const viewer = document.querySelector("matterport-viewer");
-    viewer.addEventListener("mpSdkPlaying", async (evt) => {
-      try {
-        const mpSdk = evt.detail.mpSdk;
-        await mpSdk.App.state.waitUntilReady();
-        const info = await mpSdk.Model.getData();
-        badge.textContent = `SDK connected — model: ${info.sid}`;
-        // 🔜 we'll add Security Camera FOV + room-mesh here next
-      } catch (err) {
-        console.error(err);
-        badge.textContent = "SDK init failed (see console)";
+    // Load the Matterport web component (local copy you staged)
+    const loadScript = (url) => new Promise((res, rej) => {
+      const s = document.createElement('script'); s.src = url; s.async = false;
+      s.onload = () => res(url); s.onerror = () => rej(new Error('failed: ' + url));
+      document.head.appendChild(s);
+    });
+
+    const WC_URLS = [
+      './vendors/matterport-webcomponent/0.1.45/webcomponent.js',
+      'https://cdn.jsdelivr.net/npm/@matterport/webcomponent@0.1.45/dist/webcomponent.js',
+      'https://unpkg.com/@matterport/webcomponent@0.1.45/dist/webcomponent.js',
+    ];
+
+    const badge = document.getElementById('badge');
+    const viewer = document.querySelector('matterport-viewer');
+
+    (async () => {
+      // try local first, then CDN fallback just in case
+      for (const u of WC_URLS) {
+        try { await loadScript(u); console.log('[loader] webcomponent:', u); break; }
+        catch (e) { console.warn('[loader] failed:', u); }
       }
-    });
-    viewer.addEventListener("error", (e) => {
-      console.error("Matterport webcomponent error:", e);
-      badge.textContent = "viewer error (see console)";
-    });
+
+      // --- Diagnostics: log every useful event ---
+      const log = (evt) => console.log(`[${evt.type}]`, evt.detail ?? '');
+      ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged',
+       'mpError','mpSdkError'].forEach(t => viewer.addEventListener(t, log));
+
+      // SDK “playing” gives us the mpSdk instance
+      viewer.addEventListener('mpSdkPlaying', async (evt) => {
+        try {
+          const sdk = evt.detail.mpSdk;
+          const info = await sdk.Model.getData();
+          badge.textContent = `SDK connected — model: ${info.sid}`;
+          console.log('pose', await sdk.Camera.getPose());
+        } catch (err) {
+          console.error('SDK init error', err);
+          badge.textContent = 'SDK init error (see console)';
+        }
+      });
+
+      // If nothing happens for a while, tell us
+      setTimeout(() => {
+        if (badge.textContent.startsWith('loading')) {
+          console.warn('Viewer did not reach READY/PLAYING in time');
+          badge.textContent = 'still loading… (check console/network)';
+        }
+      }, 10000);
+    })();
   </script>
 </body>
 </html>
