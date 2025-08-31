@@ -1,9 +1,5 @@
 // docs/plugins/ark-security-cam.js
-// ESM plugin that runs INSIDE the viewer realm.
-// The viewer will import() this module and call the default export with `sdk`.
-
 export default function registerArkSecurityCam(sdk) {
-  // Register a Scene.Component subclass (safe in viewer realm)
   sdk.Scene.register('ark.securityCam', class extends sdk.Scene.Component {
     onInit() {
       this.inputs = {
@@ -12,22 +8,17 @@ export default function registerArkSecurityCam(sdk) {
         position: { x: 0, y: 1.6, z: 0 },
         lookAt:   { x: 1, y: 1.6, z: 0 }
       };
-
       const THREE = this.context.three;
 
       const marker = new THREE.Mesh(
         new THREE.SphereGeometry(0.06, 16, 12),
-        new THREE.MeshBasicMaterial({ color: this.inputs.color, transparent: true, opacity: 0.9 })
+        new THREE.MeshBasicMaterial({ color: this.inputs.color, transparent:true, opacity:0.9 })
       );
-
       const wedge = new THREE.Mesh(
         new THREE.ConeGeometry(0.25, 0.45, 20, 1, true),
         new THREE.MeshBasicMaterial({
-          color: this.inputs.color,
-          wireframe: true,
-          transparent: true,
-          opacity: this.inputs.opacity,
-          depthWrite: false
+          color: this.inputs.color, wireframe:true,
+          transparent:true, opacity:this.inputs.opacity, depthWrite:false
         })
       );
       wedge.rotation.x = -Math.PI / 2;
@@ -36,21 +27,18 @@ export default function registerArkSecurityCam(sdk) {
       this._group.add(marker, wedge);
       this.context.scene.add(this._group);
     }
-
     onInputsUpdated() {
       if (!this._group) return;
       const p = this.inputs.position, l = this.inputs.lookAt;
       if (p) this._group.position.set(p.x, p.y, p.z);
       if (l) this._group.lookAt(l.x, l.y, l.z);
     }
-
     onDestroy() {
       this._group?.parent?.remove(this._group);
       this._group = null;
     }
   });
 
-  // The plugin instance lets the viewer enable/disable our cam cleanly
   let node = null;
   return {
     id: 'ark.securityCam',
@@ -60,11 +48,7 @@ export default function registerArkSecurityCam(sdk) {
       const comp = node.addComponent('ark.securityCam', {});
       comp.inputs.position = { ...pose.position };
       const f = pose.forward;
-      comp.inputs.lookAt = {
-        x: pose.position.x + f.x,
-        y: pose.position.y + f.y,
-        z: pose.position.z + f.z
-      };
+      comp.inputs.lookAt = { x: pose.position.x + f.x, y: pose.position.y + f.y, z: pose.position.z + f.z };
       node.start();
     },
     onDisable() {

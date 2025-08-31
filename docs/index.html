@@ -46,7 +46,6 @@
   const viewer = document.querySelector('matterport-viewer');
   const set = (t) => (badge.textContent = t);
 
-  // Diagnostics
   ['mpReady','mpPlaying','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
     .forEach(ev => viewer.addEventListener(ev, e => console.log(`[${ev}]`, e.detail ?? null)));
 
@@ -54,42 +53,73 @@
     const sdk = evt.detail?.mpSdk;
     if (!sdk) { set('SDK missing'); return; }
 
+    // Show what plugin APIs exist
+    console.log('plugin api:',
+      { hasPlugin: !!sdk.Plugin,
+        register: typeof sdk.Plugin?.register,
+        enable:   typeof sdk.Plugin?.enable,
+        appLoad:  typeof sdk.App?.loadPlugin });
+
     set('SDK ✓ — loading plugin');
 
-    // Robust path to our plugin file under /docs/plugins/
-    const pluginUrl = new URL('./plugins/ark-security-cam.js', import.meta.url).href;
-    console.log('Loading plugin from', pluginUrl);
+    // Cache-bust the plugin URL so GitHub Pages updates are seen
+    const version = 'cam-2025-08-31a';
+    const pluginUrl = new URL(`./plugins/ark-security-cam.js?${version}`, import.meta.url).href;
+    console.log('Plugin URL:', pluginUrl);
 
     try {
-      if (sdk.Plugin?.register) {
-        // Modern flow: tell the viewer to import our ESM plugin,
-        // then enable it. (Both calls occur inside the viewer realm.)
-        await sdk.Plugin.register('ark.securityCam', pluginUrl);
-        if (sdk.Plugin?.enable) {
-          await sdk.Plugin.enable('ark.securityCam');
+      let ok = false;
+
+      // Try signature #1: register(id, url)
+      if (typeof sdk.Plugin?.register === 'function') {
+        try {
+          await sdk.Plugin.register('ark.securityCam', pluginUrl);
+          ok = true;
+          console.log('Plugin.register(id,url) OK');
+        } catch (e1) {
+          console.warn('register(id,url) failed', e1);
         }
-        set('SDK ✓ cam plugin enabled');
-        console.log('ark.securityCam plugin enabled');
-        return; // success path
       }
 
-      // Older flow on some builds: App.loadPlugin(url) auto-enables
-      if (sdk.App?.loadPlugin) {
-        await sdk.App.loadPlugin(pluginUrl);
-        set('SDK ✓ cam plugin (App.loadPlugin)');
-        console.log('ark.securityCam loaded via App.loadPlugin');
-        return;
+      // Try signature #2: register([{ id, src }])
+      if (!ok && typeof sdk.Plugin?.register === 'function') {
+        try {
+          await sdk.Plugin.register([{ id: 'ark.securityCam', src: pluginUrl }]);
+          ok = true;
+          console.log('Plugin.register([{id,src}]) OK');
+        } catch (e2) {
+          console.warn('register([{id,src}]) failed', e2);
+        }
       }
 
-      throw new Error('No Plugin.register/App.loadPlugin available on this SDK');
+      // Try legacy: App.loadPlugin(url) (auto-enables on some builds)
+      if (!ok && typeof sdk.App?.loadPlugin === 'function') {
+        try {
+          await sdk.App.loadPlugin(pluginUrl);
+          ok = true;
+          console.log('App.loadPlugin(url) OK');
+        } catch (e3) {
+          console.warn('App.loadPlugin(url) failed', e3);
+        }
+      }
+
+      if (!ok) throw new Error('No working plugin loader API on this SDK');
+
+      // Enable if available
+      if (typeof sdk.Plugin?.enable === 'function') {
+        await sdk.Plugin.enable('ark.securityCam');
+        console.log('Plugin.enable OK');
+      }
+
+      set('SDK ✓ cam plugin enabled');
+      return;
     } catch (err) {
-      console.warn('Plugin path failed, using Tag fallback.', err);
+      console.warn('Plugin path failed — falling back to Tag.add', err);
       try {
         const pose = await sdk.Camera.getPose();
-        // Use modern API (Tag.add) to avoid deprecation warnings
         await sdk.Tag.add([{
           label: 'Cam',
-          description: 'Fallback marker (Scene.Component unavailable in host)',
+          description: 'Fallback marker (viewer plugin unavailable)',
           anchorPosition: pose.position,
           stemVector: { x: 0, y: 0.2, z: 0 }
         }]);
@@ -101,7 +131,6 @@
     }
   });
 
-  // Nudge if viewer never transitions
   setTimeout(() => {
     if (badge.textContent.startsWith('loading')) {
       console.warn('Viewer did not reach READY/PLAYING in time');
