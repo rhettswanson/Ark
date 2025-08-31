@@ -8,177 +8,77 @@
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
     matterport-viewer { display:block; inline-size:100%; block-size:100dvh; }
-    .badge { position:absolute; left:10px; top:10px; z-index:5;
+    .badge {
+      position: absolute; left:10px; top:10px; z-index:5;
       padding:6px 10px; font:12px system-ui;
-      background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px; }
+      background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px;
+    }
   </style>
 
-  <!-- Showcase UI styles served locally (so we don’t hit the CDN) -->
-  <link rel="stylesheet"
-        href="./vendors/matterport-webcomponent/0.1.45/css/showcase.css">
+  <!-- Local showcase CSS so we don't hit the CDN -->
+  <link rel="stylesheet" href="./vendors/matterport-webcomponent/0.1.45/css/showcase.css">
 </head>
 <body>
   <div class="badge" id="badge">loading…</div>
 
+  <!-- Keep it minimal: NO asset-base, NO title/brand -->
   <matterport-viewer
     m="1ghABoaBFPZ"
     application-key="akqd0dp3hr9wz4eu70zd1rsab"
-    asset-base="/Ark/mp-assets"
-    play title="false" brand="false" style="outline:0">
+    play
+    style="outline:0">
   </matterport-viewer>
 
   <script type="module">
-    const badge  = document.getElementById("badge");
-    const viewer = document.querySelector("matterport-viewer");
+    // Load the Matterport web component (local copy you staged)
+    const loadScript = (url) => new Promise((res, rej) => {
+      const s = document.createElement('script'); s.src = url; s.async = false;
+      s.onload = () => res(url); s.onerror = () => rej(new Error('failed: ' + url));
+      document.head.appendChild(s);
+    });
 
-    function loadScript(url) {
-      return new Promise((resolve, reject) => {
-        const s = document.createElement("script");
-        s.src = url;
-        s.async = false;                 // keep order (not that we need it now)
-        s.onload = () => resolve(url);
-        s.onerror = () => reject(new Error("load failed: " + url));
-        document.head.appendChild(s);
-      });
-    }
-
-    async function tryLoad(urls, name) {
-      for (const u of urls) {
-        try { const ok = await loadScript(u); console.log(`[loader] ${name}:`, ok); return; }
-        catch (e) { console.warn(`[loader] ${name} failed:`, u); }
-      }
-      throw new Error(`${name}: all sources failed`);
-    }
-
-    // Only the web component is needed; THREE is provided by the SDK context.
     const WC_URLS = [
-      "./vendors/matterport-webcomponent/0.1.45/webcomponent.js",
-      "https://cdn.jsdelivr.net/npm/@matterport/webcomponent@0.1.45/dist/webcomponent.js",
-      "https://unpkg.com/@matterport/webcomponent@0.1.45/dist/webcomponent.js",
+      './vendors/matterport-webcomponent/0.1.45/webcomponent.js',
+      'https://cdn.jsdelivr.net/npm/@matterport/webcomponent@0.1.45/dist/webcomponent.js',
+      'https://unpkg.com/@matterport/webcomponent@0.1.45/dist/webcomponent.js',
     ];
 
-    try {
-      await tryLoad(WC_URLS, "webcomponent");
+    const badge = document.getElementById('badge');
+    const viewer = document.querySelector('matterport-viewer');
 
-      // ---------- SDK logic ----------
-      viewer.addEventListener("mpSdkPlaying", async (evt) => {
+    (async () => {
+      // try local first, then CDN fallback just in case
+      for (const u of WC_URLS) {
+        try { await loadScript(u); console.log('[loader] webcomponent:', u); break; }
+        catch (e) { console.warn('[loader] failed:', u); }
+      }
+
+      // --- Diagnostics: log every useful event ---
+      const log = (evt) => console.log(`[${evt.type}]`, evt.detail ?? '');
+      ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged',
+       'mpError','mpSdkError'].forEach(t => viewer.addEventListener(t, log));
+
+      // SDK “playing” gives us the mpSdk instance
+      viewer.addEventListener('mpSdkPlaying', async (evt) => {
         try {
           const sdk = evt.detail.mpSdk;
           const info = await sdk.Model.getData();
           badge.textContent = `SDK connected — model: ${info.sid}`;
-          console.log("pose", await sdk.Camera.getPose());
-
-          // Register ark.securityCam
-          sdk.Scene.register("ark.securityCam", () => {
-            return class SecurityCam extends sdk.Scene.Component {
-              constructor(ctx) {
-                super(ctx);
-                this.inputs = {
-                  near: 0.30, far: 12.0, hfovDeg: 90, aspect: 16/9,
-                  color: 0x00ff88, opacity: 0.15, wireOpacity: 0.55,
-                  worldPosition: { x: 0, y: 2.6, z: 0 },
-                  worldRotationQuat: null,
-                  worldEulerDeg: { x: 0, y: 0, z: 0 },
-                  panEnabled: false, panAngleDeg: 60, panPeriodSec: 8,
-                };
-                this.outputs = { objectRoot: null };
-                this._t = 0;
-              }
-              onInit() {
-                const T = this.context.three;  // ← provided by the SDK
-                this.root  = new T.Group();
-                this.yaw   = new T.Group();
-                this.pitch = new T.Group();
-                this.root.add(this.yaw); this.yaw.add(this.pitch);
-
-                this.material = new T.MeshBasicMaterial({
-                  color: this.inputs.color, transparent: true,
-                  opacity: this.inputs.opacity, depthWrite: false, side: T.DoubleSide
-                });
-                this.lineMat = new T.LineBasicMaterial({
-                  color: this.inputs.color, transparent: true, opacity: this.inputs.wireOpacity
-                });
-                this._buildFrustum();
-                this._applyTransform();
-                this.outputs.objectRoot = this.root;
-              }
-              _buildFrustum() {
-                const T = this.context.three;
-                const n=this.inputs.near, f=this.inputs.far;
-                const hf=T.MathUtils.degToRad(this.inputs.hfovDeg);
-                const a=this.inputs.aspect, vf=2*Math.atan(Math.tan(hf/2)/a);
-                const nw=Math.tan(hf/2)*n, nh=Math.tan(vf/2)*n;
-                const fw=Math.tan(hf/2)*f, fh=Math.tan(vf/2)*f;
-                const V=[[-nw,nh,-n],[nw,nh,-n],[nw,-nh,-n],[-nw,-nh,-n],
-                         [-fw,fh,-f],[fw,fh,-f],[fw,-fh,-f],[-fw,-fh,-f]];
-                const idx=[0,1,2,0,2,3,4,6,5,4,7,6,0,4,5,0,5,1,1,5,6,1,6,2,2,6,7,2,7,3,3,7,4,3,4,0];
-                const pos=new Float32Array(idx.length*3);
-                for(let i=0;i<idx.length;i++){const p=V[idx[i]];pos[i*3]=p[0];pos[i*3+1]=p[1];pos[i*3+2]=p[2];}
-                const g=new T.BufferGeometry(); g.setAttribute("position", new T.BufferAttribute(pos,3));
-                const ep=[0,1,1,2,2,3,3,0,4,5,5,6,6,7,7,4,0,4,1,5,2,6,3,7];
-                const epos=new Float32Array(ep.length*3);
-                for(let i=0;i<ep.length;i++){const p=V[ep[i]];epos[i*3]=p[0];epos[i*3+1]=p[1];epos[i*3+2]=p[2];}
-                const eg=new T.BufferGeometry(); eg.setAttribute("position", new T.BufferAttribute(epos,3));
-                if(!this.mesh){
-                  this.mesh=new T.Mesh(g,this.material);
-                  this.wire=new T.LineSegments(eg,this.lineMat);
-                  this.pitch.add(this.mesh,this.wire);
-                } else {
-                  this.mesh.geometry?.dispose(); this.wire.geometry?.dispose();
-                  this.mesh.geometry=g; this.wire.geometry=eg;
-                }
-              }
-              _applyTransform() {
-                const T=this.context.three;
-                this.root.position.set(this.inputs.worldPosition.x,this.inputs.worldPosition.y,this.inputs.worldPosition.z);
-                if(this.inputs.worldRotationQuat && "x" in this.inputs.worldRotationQuat){
-                  const q=this.inputs.worldRotationQuat;
-                  this.root.quaternion.set(q.x,q.y,q.z,q.w);
-                } else {
-                  const e=this.inputs.worldEulerDeg;
-                  this.root.rotation.set(T.MathUtils.degToRad(e.x||0),T.MathUtils.degToRad(e.y||0),T.MathUtils.degToRad(e.z||0),"YXZ");
-                }
-                this.yaw.rotation.set(0,0,0); this.pitch.rotation.set(0,0,0);
-              }
-              onInputsChanged(changed){
-                if(changed.near||changed.far||changed.hfovDeg||changed.aspect) this._buildFrustum();
-                if(changed.worldPosition||changed.worldRotationQuat||changed.worldEulerDeg) this._applyTransform();
-              }
-              onTick(dt){
-                if(!this.inputs.panEnabled) return;
-                const T=this.context.three, amp=T.MathUtils.degToRad(this.inputs.panAngleDeg||60);
-                const omega=(2*Math.PI)/(this.inputs.panPeriodSec||8);
-                this.yaw.rotation.y=Math.sin((this._t+=dt)*omega)*amp;
-              }
-            };
-          });
-
-          async function addCamAtViewer(hfov=90){
-            const pose = await sdk.Camera.getPose();
-            const node = await sdk.Scene.createNode();
-            const comp = node.addComponent("ark.securityCam");
-            const updates = {
-              worldPosition: {...pose.position},
-              worldRotationQuat: {...pose.rotation},
-              hfovDeg: hfov, aspect: 16/9, near: 0.3, far: 12,
-              color: 0x00aaff, opacity: 0.18, wireOpacity: 0.6, panEnabled: false
-            };
-            if (comp.inputs?.set) comp.inputs.set(updates); else Object.assign(comp.inputs, updates);
-            await node.start();
-            console.log("security cam added", node.id);
-            return node.id;
-          }
-          await addCamAtViewer(90);
-          window.addCamAtViewer = addCamAtViewer;
+          console.log('pose', await sdk.Camera.getPose());
         } catch (err) {
-          console.error(err);
-          badge.textContent = "SDK init failed (see console)";
+          console.error('SDK init error', err);
+          badge.textContent = 'SDK init error (see console)';
         }
       });
-    } catch (e) {
-      console.error(e);
-      badge.textContent = "Failed to load viewer libraries (CDN blocked?)";
-    }
+
+      // If nothing happens for a while, tell us
+      setTimeout(() => {
+        if (badge.textContent.startsWith('loading')) {
+          console.warn('Viewer did not reach READY/PLAYING in time');
+          badge.textContent = 'still loading… (check console/network)';
+        }
+      }, 10000);
+    })();
   </script>
 </body>
 </html>
