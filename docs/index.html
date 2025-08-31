@@ -3,31 +3,18 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ark – Matterport (Web Component)</title>
+  <title>Ark – Security Cam</title>
   <style>
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
     matterport-viewer { display:block; inline-size:100%; block-size:100dvh; }
-    .badge {
+    .badge{
       position:absolute; left:10px; top:10px; z-index:5;
       padding:6px 10px; font:12px system-ui;
       background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px;
     }
   </style>
-
-  <!-- Local showcase CSS -->
-  <link rel="stylesheet" href="./css/showcase.css" />
-
-  <!-- Import map (local Three + local webcomponent ESM) -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "./vendors/three/0.176.0/build/three.module.js",
-      "three/addons/": "./vendors/three/0.176.0/examples/jsm/",
-      "@matterport/webcomponent": "./vendors/matterport-webcomponent/0.1.45/matterport-viewer.esm.js"
-    }
-  }
-  </script>
+  <link rel="stylesheet" href="./css/showcase.css">
 </head>
 <body>
   <div class="badge" id="badge">loading…</div>
@@ -36,140 +23,106 @@
     m="1ghABoaBFPZ"
     application-key="akqd0dp3hr9wz4eu70zd1rsab"
     asset-base="/Ark"
-    play title="false" brand="false" style="outline:0">
+    play
+    title="false"
+    brand="false"
+    style="outline:0">
   </matterport-viewer>
 
-  <script type="module">
-    import "@matterport/webcomponent";
+  <!-- UMD viewer (must NOT be the ESM file) -->
+  <script src="./vendors/matterport-webcomponent/0.1.45/webcomponent.js"></script>
 
-    const badge  = document.getElementById('badge');
-    const viewer = document.querySelector('matterport-viewer');
+  <script>
+  const badge  = document.getElementById('badge');
+  const viewer = document.querySelector('matterport-viewer');
 
-    const log = (e) => console.log(`[${e.type}]`, e.detail ?? '');
-    ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
-      .forEach(t => viewer.addEventListener(t, log));
+  // --- Security Cam component (extends Matterport's base) ---
+  function registerSecurityCam(sdk){
+    try {
+      class SecurityCam extends sdk.Scene.Component {
+        onInit(){
+          this.inputs = {
+            color: 0x66ff99,
+            opacity: 0.35,
+            showFrustum: true,
+            position: { x: 0, y: 1.6, z: 0 },
+            lookAt:   { x: 1, y: 1.6, z: 0 }
+          };
+          const THREE = this.context.three;
 
-    // Try to resolve a real Scene.Component base (may not exist in this bundle)
-    function resolveSceneBase(sdk) {
-      const C = sdk?.Scene?.Component;
-      const maybes = [
-        C,
-        C?.default,
-        C?.Component,
-        C?.Base,
-        C?.BaseComponent,
-        C?.prototype?.constructor,
-        Object.getPrototypeOf(C),
-        Object.getPrototypeOf(C)?.constructor
-      ].filter(Boolean);
-      const Base = maybes.find(fn => typeof fn === 'function') || null;
-      console.log('[resolver] Scene.Component typeof:', typeof C, 'Resolved Base fn:', !!Base);
-      return Base;
-    }
+          const markGeo = new THREE.SphereGeometry(0.06,16,12);
+          const markMat = new THREE.MeshBasicMaterial({ color:this.inputs.color, transparent:true, opacity:0.9 });
+          this._marker = new THREE.Mesh(markGeo, markMat);
 
-    // Shared implementation: we’ll call this from either registration path
-    function securityCamImpl(ctx, self) {
-      // keep inputs as a *plain* POJO (avoids proxy traps)
-      self.inputs = {
-        color: 0x66ff99,
-        opacity: 0.35,
-        position: { x: 0,   y: 1.6, z: 0 },
-        lookAt:   { x: 1.2, y: 1.6, z: 0 },
-        showFrustum: true
-      };
+          const coneGeo = new THREE.ConeGeometry(0.35,0.5,24,1,true);
+          const coneMat = new THREE.MeshBasicMaterial({ color:this.inputs.color, wireframe:true, transparent:true, opacity:this.inputs.opacity, depthWrite:false });
+          this._frustum = new THREE.Mesh(coneGeo, coneMat);
+          this._frustum.rotation.x = -Math.PI/2;
 
-      const THREE = ctx.three;
-
-      // marker
-      const markGeo = new THREE.SphereGeometry(0.06, 16, 12);
-      const markMat = new THREE.MeshBasicMaterial({
-        color: self.inputs.color, transparent:true, opacity:0.9
-      });
-      self._marker = new THREE.Mesh(markGeo, markMat);
-
-      // simple frustum/cone
-      const frustGeo = new THREE.ConeGeometry(0.35, 0.5, 24, 1, true);
-      const frustMat = new THREE.MeshBasicMaterial({
-        color: self.inputs.color, wireframe:true, transparent:true,
-        opacity:self.inputs.opacity, depthWrite:false
-      });
-      self._frustum = new THREE.Mesh(frustGeo, frustMat);
-      self._frustum.rotation.x = -Math.PI / 2;
-
-      // group into scene
-      self._group = new THREE.Group();
-      self._group.add(self._marker, self._frustum);
-      ctx.scene.add(self._group);
-
-      // initial placement
-      if (self.inputs.position) {
-        const p = self.inputs.position;
-        self._group.position.set(p.x, p.y, p.z);
-      }
-      if (self.inputs.lookAt) {
-        const l = self.inputs.lookAt;
-        self._group.lookAt(l.x, l.y, l.z);
-      }
-    }
-
-    viewer.addEventListener('mpSdkPlaying', async (evt) => {
-      try {
-        const sdk = evt.detail.mpSdk;
-
-        const Base = resolveSceneBase(sdk);
-
-        if (Base) {
-          // Path A: classic “extends Scene.Component”
-          sdk.Scene.register('ark.securityCam', class extends Base {
-            onInit() { securityCamImpl(this.context, this); }
-            onInputsUpdated() {
-              if (!this._group) return;
-              const p = this.inputs.position, l = this.inputs.lookAt;
-              if (p) this._group.position.set(p.x, p.y, p.z);
-              if (l) this._group.lookAt(l.x, l.y, l.z);
-            }
-            onDestroy() {
-              this._group?.parent?.remove(this._group);
-              this._group = this._marker = this._frustum = null;
-            }
-          });
-        } else {
-          // Path B: fallback – register a *plain* class; SDK will pass ctx into onInit(ctx)
-          sdk.Scene.register('ark.securityCam', class {
-            onInit(ctx) { this.context = ctx; securityCamImpl(ctx, this); }
-            onInputsUpdated() {
-              if (!this._group) return;
-              const p = this.inputs?.position, l = this.inputs?.lookAt;
-              if (p) this._group.position.set(p.x, p.y, p.z);
-              if (l) this._group.lookAt(l.x, l.y, l.z);
-            }
-            onDestroy() {
-              this._group?.parent?.remove(this._group);
-              this._group = this._marker = this._frustum = null;
-            }
-          });
+          this._group = new THREE.Group();
+          this._group.add(this._marker, this._frustum);
+          this.context.scene.add(this._group);
         }
 
-        // Add the cam node (pass a *plain* {} so no proxies are created)
-        const node = await sdk.Scene.createNode();
-        node.addComponent('ark.securityCam', {});
-        node.start();
+        onInputsUpdated(){
+          if (!this._group) return;
+          const p = this.inputs.position, l = this.inputs.lookAt;
+          if (p) this._group.position.set(p.x,p.y,p.z);
+          if (l) this._group.lookAt(l.x,l.y,l.z);
+          this._frustum.visible = !!this.inputs.showFrustum;
+        }
 
-        const info = await sdk.Model.getData();
-        badge.textContent = `SDK connected — model: ${info.sid}`;
-      } catch (err) {
-        console.error('SDK init error', err);
-        badge.textContent = 'SDK init error (see console)';
+        onDestroy(){
+          this._group?.parent?.remove(this._group);
+          this._group = this._marker = this._frustum = null;
+        }
       }
-    });
 
-    // Fallback message if the viewer never reaches playing
-    setTimeout(() => {
-      if (badge.textContent.startsWith('loading')) {
-        console.warn('Viewer did not reach READY/PLAYING in time');
-        badge.textContent = 'still loading… (check console/network)';
-      }
-    }, 10000);
+      sdk.Scene.register('ark.securityCam', SecurityCam);
+      return true;
+    } catch (e){
+      console.error('SecurityCam register failed', e);
+      return false;
+    }
+  }
+
+  const log = e => console.log(`[${e.type}]`, e.detail ?? '');
+  ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
+    .forEach(t => viewer.addEventListener(t, log));
+
+  viewer.addEventListener('mpSdkPlaying', async (evt) => {
+    try{
+      const sdk = evt.detail.mpSdk;
+
+      const ok = registerSecurityCam(sdk);
+      if (!ok){ badge.textContent = 'Security Cam disabled (register failed)'; return; }
+
+      const node = await sdk.Scene.createNode();
+      const comp = node.addComponent('ark.securityCam', {}); // pass a literal {}
+      node.start();
+
+      const pose = await sdk.Camera.getPose();
+      comp.inputs.position = { x: pose.position.x, y: pose.position.y, z: pose.position.z };
+      comp.inputs.lookAt   = {
+        x: pose.position.x + pose.forward.x,
+        y: pose.position.y + pose.forward.y,
+        z: pose.position.z + pose.forward.z
+      };
+
+      const info = await sdk.Model.getData();
+      badge.textContent = `SDK connected — model: ${info.sid}`;
+    }catch(err){
+      console.error('SDK init error', err);
+      badge.textContent = 'SDK init error (see console)';
+    }
+  });
+
+  setTimeout(() => {
+    if (badge.textContent.startsWith('loading')){
+      console.warn('Viewer did not reach READY/PLAYING in time');
+      badge.textContent = 'still loading… (check console/network)';
+    }
+  }, 10000);
   </script>
 </body>
 </html>
