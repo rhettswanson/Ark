@@ -52,25 +52,33 @@
 
     // Init SDK + register/add a trivial component (debugging the hasOwnProperty error)
     viewer.addEventListener('mpSdkPlaying', async (evt) => {
-      try {
-        const sdk = evt.detail.mpSdk;
+  try {
+    const sdk = evt.detail.mpSdk;
 
-        // Dummy, plain-inputs scene component
-        sdk.Scene.register('x.dummy', class extends sdk.Scene.Component {
-          onInit() { this.inputs = {}; } // must be a plain {}, no getters/proxies
-        });
+    // In some bundles Scene.Component is a module object with a `default`
+       console.log('Scene.Component typeof:', typeof sdk.Scene.Component, sdk.Scene.Component);
+       const BaseComponent =
+      (sdk.Scene.Component && typeof sdk.Scene.Component === 'object' && 'default' in sdk.Scene.Component)
+        ? sdk.Scene.Component.default
+        : sdk.Scene.Component;
 
-        const node = await sdk.Scene.createNode();
-        node.addComponent('x.dummy', {}); // pass a plain empty object
-        node.start();
-
-        const info = await sdk.Model.getData();
-        badge.textContent = `SDK connected — model: ${info.sid}`;
-      } catch (err) {
-        console.error('SDK init error', err);
-        badge.textContent = 'SDK init error (see console)';
-      }
+    // Register a minimal dummy component (plain inputs)
+    sdk.Scene.register('x.dummy', class extends BaseComponent {
+      onInit() { this.inputs = {}; }  // keep inputs as a plain object
     });
+
+    // Create a node and attach the component — pass a plain {} to avoid proxy traps
+    const node = await sdk.Scene.createNode();
+    node.addComponent('x.dummy', {});   // important: a literal plain object
+    node.start();
+
+    const info = await sdk.Model.getData();
+    badge.textContent = `SDK connected — model: ${info.sid}`;
+  } catch (err) {
+    console.error('SDK init error', err);
+    badge.textContent = 'SDK init error (see console)';
+  }
+});
 
     // Timeout notice if nothing happens
     setTimeout(() => {
