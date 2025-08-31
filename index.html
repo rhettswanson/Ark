@@ -18,11 +18,8 @@
 
         const THREE = showcase.contentWindow.THREE;
 
-        const [sceneObject] = await mpSdk.Scene.createObjects(1);
-        const node = sceneObject.addNode();
-
         const radius = 5;
-        const height = 10;
+        height = 10;
         const radialSegments = 32;
         const heightSegments = 1;
 
@@ -31,13 +28,10 @@
 
         const mesh = new THREE.Mesh(geometry, material);
 
-        // Start the node first to initialize objectRoot
-        node.start();
+        // Add to the main scene
+        showcase.contentWindow.scene.add(mesh);
 
-        // Now add the mesh
-        node.objectRoot.add(mesh);
-
-        // Set on the mesh
+        // Set position and rotation
         mesh.position.set(0, 1.5, 0);
         mesh.rotation.set(THREE.MathUtils.degToRad(-90), 0, 0);
         mesh.scale.set(1, 1, 1);
