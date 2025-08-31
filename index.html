@@ -1,84 +1,52 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ark – Matterport (Web Component)</title>
-  <style>
-    :root { color-scheme: dark; }
-    html,body { height:100%; margin:0; background:#111; color:#eee; }
-    matterport-viewer { display:block; inline-size:100%; block-size:100dvh; }
-    .badge {
-      position: absolute; left:10px; top:10px; z-index:5;
-      padding:6px 10px; font:12px system-ui;
-      background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px;
-    }
-  </style>
-
-  <!-- Local showcase CSS so we don't hit the CDN -->
-  <link rel="stylesheet" href="./vendors/matterport-webcomponent/0.1.45/css/showcase.css">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Security Camera FOV in Matterport</title>
+  <style>body { margin: 0; overflow: hidden; }</style>
 </head>
 <body>
-  <div class="badge" id="badge">loading…</div>
-
-  <!-- Keep it minimal: NO asset-base, NO title/brand -->
-  <matterport-viewer
-    m="1ghABoaBFPZ"
-    application-key="akqd0dp3hr9wz4eu70zd1rsab"
-    play
-    style="outline:0">
-  </matterport-viewer>
-
+  <iframe id="showcase" width="100%" height="100%" src="/bundle/showcase.html?m=1ghABoaBFPZ&applicationKey=akqd0dp3hr9wz4eu70zd1rsab" frameborder="0" allowfullscreen allow="xr-spatial-tracking"></iframe>
   <script type="module">
-    // Load the Matterport web component (local copy you staged)
-    const loadScript = (url) => new Promise((res, rej) => {
-      const s = document.createElement('script'); s.src = url; s.async = false;
-      s.onload = () => res(url); s.onerror = () => rej(new Error('failed: ' + url));
-      document.head.appendChild(s);
-    });
+    const showcase = document.getElementById('showcase');
+    showcase.addEventListener('load', async () => {
+      try {
+        const mpSdk = await showcase.contentWindow.MP_SDK.connect(showcase.contentWindow);
+        console.log('SDK Connected:', mpSdk);
 
-    const WC_URLS = [
-      './vendors/matterport-webcomponent/0.1.45/webcomponent.js',
-      'https://cdn.jsdelivr.net/npm/@matterport/webcomponent@0.1.45/dist/webcomponent.js',
-      'https://unpkg.com/@matterport/webcomponent@0.1.45/dist/webcomponent.js',
-    ];
+        // Create a scene object and node
+        const [sceneObject] = await mpSdk.Scene.createObjects(1);
+        const node = sceneObject.addNode();
 
-    const badge = document.getElementById('badge');
-    const viewer = document.querySelector('matterport-viewer');
+        // Define FOV geometry (adjust these params based on your cam specs)
+        const radius = 5;  // Base radius of the cone (half the FOV width at max range)
+        const height = 10; // Length/depth of the FOV cone
+        const radialSegments = 32; // Smoothness
+        const heightSegments = 1;
 
-    (async () => {
-      // try local first, then CDN fallback just in case
-      for (const u of WC_URLS) {
-        try { await loadScript(u); console.log('[loader] webcomponent:', u); break; }
-        catch (e) { console.warn('[loader] failed:', u); }
+        const geometry = new THREE.ConeGeometry(radius, height, radialSegments, heightSegments);
+        const material = new THREE.MeshBasicMaterial({ color: 0xffff00, opacity: 0.5, transparent: true, side: THREE.DoubleSide });
+
+        // Add the mesh component to the node
+        node.addComponent('mp.mesh', {
+          geometry: geometry,
+          material: material,
+          // Position: Replace with your cam's {x, y, z} coords
+          position: { x: 0, y: 1.5, z: 0 },  // Example: y=1.5 for typical cam height
+          // Rotation: Adjust to point the cone in the cam's direction (in degrees)
+          rotation: { x: -90, y: 0, z: 0 },  // Example: pointing forward/down
+          scale: { x: 1, y: 1, z: 1 }
+        });
+
+        // Start the node to make it visible
+        node.start();
+
+        console.log('FOV cone added!');
+      } catch (e) {
+        console.error('Error:', e);
       }
-
-      // --- Diagnostics: log every useful event ---
-      const log = (evt) => console.log(`[${evt.type}]`, evt.detail ?? '');
-      ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged',
-       'mpError','mpSdkError'].forEach(t => viewer.addEventListener(t, log));
-
-      // SDK “playing” gives us the mpSdk instance
-      viewer.addEventListener('mpSdkPlaying', async (evt) => {
-        try {
-          const sdk = evt.detail.mpSdk;
-          const info = await sdk.Model.getData();
-          badge.textContent = `SDK connected — model: ${info.sid}`;
-          console.log('pose', await sdk.Camera.getPose());
-        } catch (err) {
-          console.error('SDK init error', err);
-          badge.textContent = 'SDK init error (see console)';
-        }
-      });
-
-      // If nothing happens for a while, tell us
-      setTimeout(() => {
-        if (badge.textContent.startsWith('loading')) {
-          console.warn('Viewer did not reach READY/PLAYING in time');
-          badge.textContent = 'still loading… (check console/network)';
-        }
-      }, 10000);
-    })();
+    });
   </script>
 </body>
 </html>
