@@ -4,35 +4,43 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Ark – Matterport (Web Component)</title>
+
+  <!-- Make absolute URLs like /css/... and /fonts/... resolve under /Ark/ -->
+  <base href="/Ark/">
+
   <style>
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
     matterport-viewer { display:block; inline-size:100%; block-size:100dvh; }
     .badge {
-      position: absolute; left:10px; top:10px; z-index:5;
+      position:absolute; left:10px; top:10px; z-index:5;
       padding:6px 10px; font:12px system-ui;
       background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px;
     }
   </style>
 
-  <!-- Local Showcase CSS (and you already host the fonts), avoiding CDN -->
-  <link rel="stylesheet" href="./vendors/matterport-webcomponent/0.1.45/css/showcase.css">
+  <!-- Local showcase CSS (also matches what the component fetches as /css/showcase.css) -->
+  <link rel="stylesheet" href="./css/showcase.css">
 </head>
 <body>
   <div class="badge" id="badge">loading…</div>
 
-  <!-- Minimal embed: drive the component with an explicit Showcase URL -->
   <matterport-viewer
-    id="mp"
-    src="https://my.matterport.com/show/?m=1ghABoaBFPZ&play=1&brand=0&title=0&applicationKey=akqd0dp3hr9wz4eu70zd1rsab"
-    style="outline:0; display:block; inline-size:100%; block-size:100dvh;">
+    m="1ghABoaBFPZ"
+    application-key="akqd0dp3hr9wz4eu70zd1rsab"
+    asset-base="/Ark"
+    play title="false" brand="false" style="outline:0">
   </matterport-viewer>
 
   <script type="module">
-    // Load the Matterport web component (local first, CDN fallback)
+    const badge  = document.getElementById('badge');
+    const viewer = document.querySelector('matterport-viewer');
+
     const loadScript = (url) => new Promise((res, rej) => {
-      const s = document.createElement('script'); s.src = url; s.async = false;
-      s.onload = () => res(url); s.onerror = () => rej(new Error('failed: ' + url));
+      const s = document.createElement('script');
+      s.src = url; s.async = false;
+      s.onload = () => res(url);
+      s.onerror = () => rej(new Error('failed: ' + url));
       document.head.appendChild(s);
     });
 
@@ -42,21 +50,16 @@
       'https://unpkg.com/@matterport/webcomponent@0.1.45/dist/webcomponent.js',
     ];
 
-    const badge  = document.getElementById('badge');
-    const viewer = document.querySelector('matterport-viewer');
-
     (async () => {
       for (const u of WC_URLS) {
         try { await loadScript(u); console.log('[loader] webcomponent:', u); break; }
-        catch (e) { console.warn('[loader] failed:', u); }
+        catch { /* try next */ }
       }
 
-      // Diagnostics: log useful events
       const log = (evt) => console.log(`[${evt.type}]`, evt.detail ?? '');
       ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
         .forEach(t => viewer.addEventListener(t, log));
 
-      // When SDK is ready, show some info
       viewer.addEventListener('mpSdkPlaying', async (evt) => {
         try {
           const sdk = evt.detail.mpSdk;
@@ -69,7 +72,6 @@
         }
       });
 
-      // If nothing happens for a while, nudge us to check network
       setTimeout(() => {
         if (badge.textContent.startsWith('loading')) {
           console.warn('Viewer did not reach READY/PLAYING in time');
