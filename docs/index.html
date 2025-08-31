@@ -50,13 +50,13 @@
 
     // LOCAL first, then CDN fallbacks
     const THREE_URLS = [
-      "./vendors/three/0.176.0/build/three.min.js",
+      "./vendors/three/0.176.0/three.js",                          // <- your local file
       "https://cdn.jsdelivr.net/npm/three@0.176.0/build/three.min.js",
       "https://unpkg.com/three@0.176.0/build/three.min.js",
     ];
 
     const WC_URLS = [
-      "./vendors/matterport-webcomponent/0.1.45/webcomponent.js",
+      "./vendors/matterport-webcomponent/0.1.45/webcomponent.js",  // <- your local file (copied UMD)
       "https://cdn.jsdelivr.net/npm/@matterport/webcomponent@0.1.45/dist/webcomponent.js",
       "https://unpkg.com/@matterport/webcomponent@0.1.45/dist/webcomponent.js",
     ];
