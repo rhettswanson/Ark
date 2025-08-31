@@ -45,86 +45,23 @@
     const badge  = document.getElementById('badge');
     const viewer = document.querySelector('matterport-viewer');
 
-    // ---- SecurityCam scene component (plain inputs object) ----
-    function registerSecurityCam(sdk) {
-      try {
-        sdk.Scene.register('ark.securityCam', class extends sdk.Scene.Component {
-          onInit() {
-            // Plain object; no getters; no custom prototype.
-            this.inputs = {
-              color: 0x66ff99,
-              opacity: 0.35,
-              fov: 35,
-              showFrustum: true,
-              position: { x: 0, y: 1.6, z: 0 },
-              lookAt:   { x: 1, y: 1.6, z: 0 }
-            };
-
-            const THREE = this.context.three;
-
-            // Small marker
-            const markGeo = new THREE.SphereGeometry(0.06, 16, 12);
-            const markMat = new THREE.MeshBasicMaterial({ color: this.inputs.color, transparent:true, opacity:0.9 });
-            this._marker = new THREE.Mesh(markGeo, markMat);
-
-            // Frustum (wireframe cone)
-            const frustGeo = new THREE.ConeGeometry(0.35, 0.5, 24, 1, true);
-            const frustMat = new THREE.MeshBasicMaterial({
-              color: this.inputs.color, wireframe:true, transparent:true, opacity:this.inputs.opacity, depthWrite:false
-            });
-            this._frustum = new THREE.Mesh(frustGeo, frustMat);
-            this._frustum.rotation.x = -Math.PI / 2;
-
-            this._group = new THREE.Group();
-            this._group.add(this._marker, this._frustum);
-
-            this.context.scene.add(this._group);
-          }
-
-          onDestroy() {
-            this._group?.parent?.remove(this._group);
-            this._marker = this._frustum = this._group = null;
-          }
-
-          // (Very light reactive update; avoid fancy proxies)
-          onInputsUpdated(prev) {
-            if (!this._group) return;
-            const p = this.inputs.position, l = this.inputs.lookAt;
-            if (p) this._group.position.set(p.x, p.y, p.z);
-            if (l)  this._group.lookAt(l.x, l.y, l.z);
-          }
-        });
-      } catch (e) {
-        // ok on hot-reload; rethrow real errors
-        if (!/already registered/i.test(String(e?.message))) throw e;
-      }
-    }
-    // -----------------------------------------------------------
-
-    // Helpful diagnostics
+    // Diagnostics
     const log = (e) => console.log(`[${e.type}]`, e.detail ?? '');
     ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
       .forEach(t => viewer.addEventListener(t, log));
 
-    // Init SDK + auto-add the camera
+    // Init SDK + register/add a trivial component (debugging the hasOwnProperty error)
     viewer.addEventListener('mpSdkPlaying', async (evt) => {
       try {
         const sdk = evt.detail.mpSdk;
-        registerSecurityCam(sdk);
+
+        // Dummy, plain-inputs scene component
+        sdk.Scene.register('x.dummy', class extends sdk.Scene.Component {
+          onInit() { this.inputs = {}; } // must be a plain {}, no getters/proxies
+        });
 
         const node = await sdk.Scene.createNode();
-
-        // CRUCIAL: pass a plain object
-        const comp = node.addComponent('ark.securityCam', {});
-
-        // Seed from current camera
-        const pose = await sdk.Camera.getPose();
-        const fwd  = pose.forward;
-        comp.inputs.position = { x: pose.position.x, y: pose.position.y, z: pose.position.z };
-        comp.inputs.lookAt   = { x: pose.position.x + fwd.x,
-                                 y: pose.position.y + fwd.y,
-                                 z: pose.position.z + fwd.z };
-
+        node.addComponent('x.dummy', {}); // pass a plain empty object
         node.start();
 
         const info = await sdk.Model.getData();
