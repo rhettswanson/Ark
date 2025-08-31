@@ -19,15 +19,16 @@
   <link rel="stylesheet" href="./css/showcase.css" />
 
   <!-- Import map (valid JSON only; no trailing commas) -->
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "./vendors/three/0.176.0/build/three.module.js",
-      "three/addons/": "./vendors/three/0.176.0/examples/jsm/",
-      "@matterport/webcomponent": "./vendors/matterport-webcomponent/0.1.45/matterport-viewer.esm.js"
-    }
+  <!-- put this in <head>, before any <script type="module"> -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendors/three/0.176.0/build/three.module.js",
+    "three/addons/": "./vendors/three/0.176.0/examples/jsm/",
+    "@matterport/webcomponent": "./vendors/matterport-webcomponent/0.1.45/matterport-viewer.esm.js"
   }
-  </script>
+}
+</script>
 </head>
 <body>
   <div class="badge" id="badge">loading…</div>
