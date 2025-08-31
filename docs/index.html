@@ -8,43 +8,43 @@
     :root { color-scheme: dark; }
     html,body { height:100%; margin:0; background:#111; color:#eee; }
     matterport-viewer { display:block; inline-size:100%; block-size:100dvh; }
-    .badge { position:absolute; left:10px; top:10px; z-index:5; padding:6px 10px;
-             font:12px system-ui; background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px; }
+    .badge {
+      position:absolute; left:10px; top:10px; z-index:5;
+      padding:6px 10px; font:12px system-ui;
+      background:rgba(0,0,0,.55); border:1px solid #333; border-radius:8px;
+    }
   </style>
-  <!-- local CSS so the loader never needs the CDN -->
-  <link rel="stylesheet" href="./vendors/matterport-webcomponent/0.1.45/css/showcase.css">
+
+  <!-- Load the ESM module; it will register <matterport-viewer>
+       and pull its CSS/fonts from ./vendors/.../built-bundle/...  -->
+  <script type="module" src="./vendors/matterport-webcomponent/0.1.45/matterport-viewer.esm.js"></script>
 </head>
 <body>
   <div class="badge" id="badge">loading…</div>
 
-  <!-- Keep it minimal; no brand/title attributes -->
+  <!-- Minimal config; no asset-base needed for the component itself -->
   <matterport-viewer
     m="1ghABoaBFPZ"
     application-key="akqd0dp3hr9wz4eu70zd1rsab"
     play
+    title="false"
+    brand="false"
     style="outline:0">
   </matterport-viewer>
 
-  <script>
-    // Load the UMD bundle we’re serving as webcomponent.js
-    (function () {
-      const s = document.createElement('script');
-      s.src = './vendors/matterport-webcomponent/0.1.45/webcomponent.js';
-      s.onload = () => console.log('[loader] webcomponent loaded');
-      s.onerror = e => console.error('failed to load webcomponent.js', e);
-      document.head.appendChild(s);
-    })();
-
-    // Diagnostics + SDK hook
-    const badge = document.getElementById('badge');
+  <script type="module">
+    const badge  = document.getElementById('badge');
     const viewer = document.querySelector('matterport-viewer');
 
+    // log useful lifecycle events
+    const log = (evt) => console.log(`[${evt.type}]`, evt.detail ?? '');
     ['mpReady','mpProgress','mpCameraAvailable','mpNavigationChanged','mpError','mpSdkError']
-      .forEach(t => viewer.addEventListener(t, e => console.log(`[${t}]`, e.detail ?? '')));
+      .forEach(t => viewer.addEventListener(t, log));
 
-    viewer.addEventListener('mpSdkPlaying', async e => {
+    // When the SDK is ready/playing, run your code
+    viewer.addEventListener('mpSdkPlaying', async (evt) => {
       try {
-        const sdk = e.detail.mpSdk;
+        const sdk  = evt.detail.mpSdk;
         const info = await sdk.Model.getData();
         badge.textContent = `SDK connected — model: ${info.sid}`;
         console.log('pose', await sdk.Camera.getPose());
@@ -54,7 +54,7 @@
       }
     });
 
-    // Gentle timeout notice
+    // Timeout hint if nothing fires
     setTimeout(() => {
       if (badge.textContent.startsWith('loading')) {
         console.warn('Viewer did not reach READY/PLAYING in time');
