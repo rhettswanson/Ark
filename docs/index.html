@@ -18,28 +18,54 @@
 
         const THREE = showcase.contentWindow.THREE;
 
+        // Register custom component
+        mpSdk.Scene.register('custom.fovCone', function () {
+          return {
+            name: 'custom.fovCone',
+            inputs: {
+              visible: true,
+              geometry: null,
+              material: null,
+            },
+            outputs: {}, // No objectRoot here - it's provided
+            onInit: function () {
+              this.mesh = new THREE.Mesh(this.inputs.geometry, this.inputs.material);
+              this.outputs.objectRoot.add(this.mesh); // Use the provided objectRoot
+            },
+            onEvent: function (event) {
+              if (event === mpSdk.Scene.SceneEventType.UPDATE) {
+                this.mesh.visible = this.inputs.visible;
+              }
+            },
+            onDestroy: function () {
+              this.outputs.objectRoot.remove(this.mesh);
+            },
+          };
+        });
+
         const [sceneObject] = await mpSdk.Scene.createObjects(1);
         const node = sceneObject.addNode();
 
-        const radius = 5;  // Base radius
-        const height = 10; // Length
+        const radius = 5;
+        const height = 10;
         const radialSegments = 32;
         const heightSegments = 1;
 
         const geometry = new THREE.ConeGeometry(radius, height, radialSegments, heightSegments);
         const material = new THREE.MeshBasicMaterial({ color: 0xffff00, opacity: 0.5, transparent: true, side: THREE.DoubleSide });
 
-        const mesh = new THREE.Mesh(geometry, material);
+        // Add the custom component
+        node.addComponent('custom.fovCone', {
+          geometry: geometry,
+          material: material,
+          visible: true
+        });
 
-        // Add the mesh to the node's objectRoot
-        node.objectRoot.add(mesh);
+        // Set position and rotation on the node
+        node.position.set(0, 1.5, 0);
+        node.rotation.set(THREE.MathUtils.degToRad(-90), 0, 0);
+        node.scale.set(1, 1, 1);
 
-        // Set position and rotation on the mesh
-        mesh.position.set(0, 1.5, 0); // Example
-        mesh.rotation.set(THREE.MathUtils.degToRad(-90), 0, 0); // Example, in radians
-        mesh.scale.set(1, 1, 1);
-
-        // Start the node
         node.start();
 
         console.log('FOV cone added!');
