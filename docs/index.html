@@ -46,86 +46,74 @@
   const viewer = document.querySelector('matterport-viewer');
   const set = (t) => (badge.textContent = t);
 
-  // Tweakables
-  const FOLLOW_CAMERA = true;     // make the wedge follow you as you move
-  const WEDGE_SCALE   = 0.55;     // overall size (uniform)
-  const HEIGHT_OFFSET = 0.00;     // raise/lower the wedge in meters
+  const FOLLOW_CAMERA = true;
+  const WEDGE_SCALE   = 0.55;
+  const HEIGHT_OFFSET = 0.00;
+  const AXIS_CORRECTION_EULER_DEG = [0, 0, 0]; // adjust if pointing wrong
 
-  // If your GLB's forward axis isn't +Z, set a fixed local correction here.
-  // Examples:
-  //  - GLB forward is +Y  -> rotate +90° around X  => [ +90, 0, 0 ]
-  //  - GLB forward is -Z  -> rotate 180° around Y  => [ 0, 180, 0 ]
-  //  - GLB forward is +X  -> rotate -90° around Y  => [ 0, -90, 0 ]
-  const AXIS_CORRECTION_EULER_DEG = [0, 0, 0]; // [xDeg, yDeg, zDeg]
-
-  // --- small vector/quaternion helpers (no THREE import needed) ---
-  const V = (x=0,y=0,z=0) => ({x:Number(x)||0,y:Number(y)||0,z:Number(z)||0});
+  // --- math helpers (no THREE import needed) ---
+  const V = (x=0,y=0,z=0)=>({x:+x||0,y:+y||0,z:+z||0});
   const len = (v)=>Math.hypot(v.x,v.y,v.z)||1;
-  const norm = (v)=>{ const s = 1/len(v); return {x:v.x*s,y:v.y*s,z:v.z*s}; };
+  const norm = (v)=>{ const s=1/len(v); return {x:v.x*s,y:v.y*s,z:v.z*s}; };
   const dot = (a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
-  const cross = (a,b)=>({x:a.y*b.z-a.z*b.y,y:a.z*b.x-a.x*b.z,z:a.x*b.y-a.y*b.x});
-  const qMul = (a,b)=>({ // quaternion multiply a*b
-    w:a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z,
-    x:a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
-    y:a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
-    z:a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w
-  });
-  const qNorm = (q)=>{ const s=1/Math.hypot(q.x,q.y,q.z,q.w||0); return {x:q.x*s,y:q.y*s,z:q.z*s,w:(q.w||0)*s}; };
-  const qFromEulerDeg = ([ex,ey,ez])=>{
-    const toRad = Math.PI/180; const cx=Math.cos(ex*toRad*0.5), sx=Math.sin(ex*toRad*0.5);
-    const cy=Math.cos(ey*toRad*0.5), sy=Math.sin(ey*toRad*0.5);
-    const cz=Math.cos(ez*toRad*0.5), sz=Math.sin(ez*toRad*0.5);
-    return {
-      w: cx*cy*cz + sx*sy*sz,
-      x: sx*cy*cz - cx*sy*sz,
-      y: cx*sy*cz + sx*cy*sz,
-      z: cx*cy*sz - sx*sy*cz
-    };
+  const cross=(a,b)=>({x:a.y*b.z-a.z*b.y,y:a.z*b.x-a.x*b.z,z:a.x*b.y-a.y*b.x});
+  const qMul=(a,b)=>({w:a.w*b.w-a.x*b.x-a.y*b.y-a.z*b.z,x:a.w*b.x+a.x*b.w+a.y*b.z-a.z*b.y,y:a.w*b.y-a.x*b.z+a.y*b.w+a.z*b.x,z:a.w*b.z+a.x*b.y-a.y*b.x+a.z*b.w});
+  const qNorm=(q)=>{const s=1/Math.hypot(q.x,q.y,q.z,q.w||0);return{x:q.x*s,y:q.y*s,z:q.z*s,w:(q.w||0)*s};};
+  const qFromEulerDeg=([ex,ey,ez])=>{
+    const r=Math.PI/180, cx=Math.cos(ex*r/2), sx=Math.sin(ex*r/2);
+    const cy=Math.cos(ey*r/2), sy=Math.sin(ey*r/2);
+    const cz=Math.cos(ez*r/2), sz=Math.sin(ez*r/2);
+    return {w:cx*cy*cz+sx*sy*sz,x:sx*cy*cz-cx*sy*sz,y:cx*sy*cz+sx*cy*sz,z:cx*cy*sz-sx*sy*cz};
   };
-  // Quaternion rotating unit +Z -> unit 't'
   function quatFromZTo(t){
-    const a = V(0,0,1), b = norm(t);
-    let v = cross(a,b); let w = 1 + dot(a,b);
-    if (w < 1e-6) { // opposite; pick any orthogonal axis
-      v = Math.abs(a.z) < 0.9 ? cross(a,{x:1,y:0,z:0}) : cross(a,{x:0,y:1,z:0});
-      w = 0;
-    }
+    const a=V(0,0,1), b=norm(t); let v=cross(a,b), w=1+dot(a,b);
+    if (w<1e-6){ v = Math.abs(a.z)<0.9 ? cross(a,{x:1,y:0,z:0}) : cross(a,{x:0,y:1,z:0}); w=0; }
     return qNorm({x:v.x,y:v.y,z:v.z,w});
   }
 
-  // Tag fallback for when GLB can't be fetched
-  async function addCamTagFallback(sdk) {
+  // Use MP's own Vector3 type for Tag API
+  const v3 = (sdk,x,y,z) => sdk?.Graph?.Vector3?.create ? sdk.Graph.Vector3.create(x,y,z) : {x,y,z};
+
+  async function addCamTagFallback(sdk){
     const pose = await sdk.Camera.getPose();
-    const p = { x: +pose.position.x, y: +pose.position.y, z: +pose.position.z };
-    const shapes = [
-      { label:'Cam', description:'Fallback marker (GLB missing)', anchorPosition: p, stemVector:{x:0,y:0.2,z:0} },
-      { label:'Cam', description:'Fallback marker (GLB missing)', position: p,        normal:{x:0,y:1,z:0} }
+    const p = v3(sdk, pose.position.x, pose.position.y, pose.position.z);
+    const tryDescs = [
+      { label:'Cam', description:'Fallback marker (GLB failed)', anchorPosition: p, stemVector: v3(sdk,0,0.2,0) },
+      { label:'Cam', description:'Fallback marker (GLB failed)', position: p,        normal:      v3(sdk,0,1,0) }
     ];
-    for (const d of shapes) {
-      try { await sdk.Tag.add([d]); return; } catch {}
+    let last;
+    for (const d of tryDescs){
+      try { await sdk.Tag.add([d]); return; } catch(e){ last=e; console.warn('Tag.add failed descriptor', d, e); }
     }
-    throw new Error('Tag.add fallback failed');
+    throw last;
   }
 
   let wedgeNode = null;
   async function placeOrUpdateWedge(sdk, pose){
-    if (!wedgeNode) {
+    if (!wedgeNode){
       wedgeNode = await sdk.Scene.createNode();
-      const bust = 'ark-wedge-v1';
-      const url = new URL(`./assets/ark-wedge.glb?${bust}`, import.meta.url).href;
-      // Use built-in GLTF loader (factory id string)
-      wedgeNode.addComponent('mp.gltfLoader', { url });
+
+      // Preflight the GLB to avoid cache/CORS hiccups, then feed loader an Object URL
+      const bust='ark-wedge-v2';
+      const glbHttpUrl = new URL(`./assets/ark-wedge.glb?${bust}`, import.meta.url).href;
+      console.log('GLB URL (HTTP):', glbHttpUrl);
+
+      const res = await fetch(glbHttpUrl, { cache: 'no-store' });
+      if (!res.ok) throw new Error(`GLB fetch failed ${res.status} ${res.statusText}`);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      console.log('GLB URL (blob):', objectUrl);
+
+      // Use built-in GLTF loader (factory id string works in your SDK)
+      wedgeNode.addComponent('mp.gltfLoader', { url: objectUrl });
       wedgeNode.scale.set(WEDGE_SCALE, WEDGE_SCALE, WEDGE_SCALE);
       wedgeNode.start();
     }
-    // Position at camera (optionally offset height)
-    wedgeNode.position.set(pose.position.x, pose.position.y + HEIGHT_OFFSET, pose.position.z);
 
-    // Aim +Z of the GLB toward camera forward and apply fixed axis correction
+    // Position & orientation
+    wedgeNode.position.set(pose.position.x, pose.position.y + HEIGHT_OFFSET, pose.position.z);
     const f = V(pose.forward.x, pose.forward.y, pose.forward.z);
-    const qAim = quatFromZTo(f);
-    const qFix = qFromEulerDeg(AXIS_CORRECTION_EULER_DEG);
-    const q = qNorm( qMul(qAim, qFix) );
+    const q = qNorm( qMul( quatFromZTo(f), qFromEulerDeg(AXIS_CORRECTION_EULER_DEG) ) );
     wedgeNode.quaternion.set(q.x, q.y, q.z, q.w);
   }
 
@@ -150,7 +138,7 @@
     } catch (e) {
       console.warn('GLB path failed; Tag fallback', e);
       try { await addCamTagFallback(sdk); set('SDK ✓ tag added (fallback)'); }
-      catch (e2) { set('SDK init error (see console)'); console.error(e2); }
+      catch (e2) { set('SDK init error (see console)'); console.error('Tag fallback failed:', e2); }
     }
   });
 
