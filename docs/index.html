@@ -36,14 +36,12 @@
       try {
         const sdk = evt.detail.mpSdk;
 
-        // Sanity / banner
         const info = await sdk.Model.getData();
         badge.textContent = `SDK connected — model: ${info.sid}`;
         console.log("pose", await sdk.Camera.getPose());
 
-        // -------- object-literal SceneComponent registration --------
+        // ---- register component as object literal (now with outputs stub) ----
         sdk.Scene.register("ark.securityCam", () => {
-          // All simple values; no nulls
           const inputs = {
             near: 0.3,
             far: 12.0,
@@ -129,6 +127,8 @@
 
           return {
             inputs,
+            /** IMPORTANT: predefine outputs so the proxy doesn’t hit undefined */
+            outputs: { objectRoot: null },
 
             onInit() {
               const T = this.context.three;
@@ -176,14 +176,13 @@
             }
           };
         });
-        // -------- end registration --------
+        // ---- end registration ----
 
         async function addCamAtViewer(hfov = 90) {
           const pose = await sdk.Camera.getPose();
           const node = await sdk.Scene.createNode();
           const comp = node.addComponent("ark.securityCam");
 
-          // Copy pose into plain objects
           const pos = { ...pose.position };
           const rot = { ...pose.rotation };
           const updates = {
