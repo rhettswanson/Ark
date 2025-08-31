@@ -13,6 +13,7 @@
     showcase.addEventListener('load', async () => {
       try {
         const mpSdk = await showcase.contentWindow.MP_SDK.connect(showcase.contentWindow);
+        const THREE = mpSdk.Bundle.Three;
         console.log('SDK Connected:', mpSdk);
 
         // Create a scene object and node
