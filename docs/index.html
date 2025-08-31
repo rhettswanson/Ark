@@ -46,16 +46,18 @@
   const viewer = document.querySelector('matterport-viewer');
   const set = (t) => (badge.textContent = t);
 
+  // Tweakables
   const FOLLOW_CAMERA = true;
   const WEDGE_SCALE   = 0.55;
   const HEIGHT_OFFSET = 0.00;
-  const AXIS_CORRECTION_EULER_DEG = [0, 0, 0]; // adjust if pointing wrong
+  // If your GLB’s forward isn’t +Z, try [90,0,0], [0,180,0], or [0,-90,0]
+  const AXIS_CORRECTION_EULER_DEG = [0, 0, 0];
 
   // --- math helpers (no THREE import needed) ---
   const V = (x=0,y=0,z=0)=>({x:+x||0,y:+y||0,z:+z||0});
-  const len = (v)=>Math.hypot(v.x,v.y,v.z)||1;
-  const norm = (v)=>{ const s=1/len(v); return {x:v.x*s,y:v.y*s,z:v.z*s}; };
-  const dot = (a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
+  const len=(v)=>Math.hypot(v.x,v.y,v.z)||1;
+  const norm=(v)=>{ const s=1/len(v); return {x:v.x*s,y:v.y*s,z:v.z*s}; };
+  const dot=(a,b)=>a.x*b.x+a.y*b.y+a.z*b.z;
   const cross=(a,b)=>({x:a.y*b.z-a.z*b.y,y:a.z*b.x-a.x*b.z,z:a.x*b.y-a.y*b.x});
   const qMul=(a,b)=>({w:a.w*b.w-a.x*b.x-a.y*b.y-a.z*b.z,x:a.w*b.x+a.x*b.w+a.y*b.z-a.z*b.y,y:a.w*b.y-a.x*b.z+a.y*b.w+a.z*b.x,z:a.w*b.z+a.x*b.y-a.y*b.x+a.z*b.w});
   const qNorm=(q)=>{const s=1/Math.hypot(q.x,q.y,q.z,q.w||0);return{x:q.x*s,y:q.y*s,z:q.z*s,w:(q.w||0)*s};};
@@ -71,52 +73,49 @@
     return qNorm({x:v.x,y:v.y,z:v.z,w});
   }
 
-  // Use MP's own Vector3 type for Tag API
-  const v3 = (sdk,x,y,z) => sdk?.Graph?.Vector3?.create ? sdk.Graph.Vector3.create(x,y,z) : {x,y,z};
-
-  async function addCamTagFallback(sdk){
+  // Fallback using legacy Mattertag API (works reliably here)
+  async function addCamMattertagFallback(sdk){
     const pose = await sdk.Camera.getPose();
-    const p = v3(sdk, pose.position.x, pose.position.y, pose.position.z);
-    const tryDescs = [
-      { label:'Cam', description:'Fallback marker (GLB failed)', anchorPosition: p, stemVector: v3(sdk,0,0.2,0) },
-      { label:'Cam', description:'Fallback marker (GLB failed)', position: p,        normal:      v3(sdk,0,1,0) }
-    ];
-    let last;
-    for (const d of tryDescs){
-      try { await sdk.Tag.add([d]); return; } catch(e){ last=e; console.warn('Tag.add failed descriptor', d, e); }
-    }
-    throw last;
+    const p = { x:+pose.position.x, y:+pose.position.y, z:+pose.position.z };
+    await sdk.Mattertag.add([{
+      label: 'Cam',
+      description: 'Fallback marker (GLB failed)',
+      anchorPosition: p,
+      stemVector: { x: 0, y: 0.2, z: 0 }
+    }]);
   }
 
-  let wedgeNode = null;
+  let sceneObj = null, wedgeNode = null;
+
   async function placeOrUpdateWedge(sdk, pose){
     if (!wedgeNode){
-      wedgeNode = await sdk.Scene.createNode();
-
-      // Preflight the GLB to avoid cache/CORS hiccups, then feed loader an Object URL
-      const bust='ark-wedge-v2';
+      // Use the viewer-resolvable HTTPS URL (NOT a blob:)
+      const bust = 'ark-wedge-v2';
       const glbHttpUrl = new URL(`./assets/ark-wedge.glb?${bust}`, import.meta.url).href;
       console.log('GLB URL (HTTP):', glbHttpUrl);
 
-      const res = await fetch(glbHttpUrl, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`GLB fetch failed ${res.status} ${res.statusText}`);
-      const blob = await res.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      console.log('GLB URL (blob):', objectUrl);
+      // Follow the SDK sample pattern: createObjects(1) then addNode()
+      const [ obj ] = await sdk.Scene.createObjects(1);
+      sceneObj = obj;
+      wedgeNode = sceneObj.addNode();
 
-      // Use built-in GLTF loader (factory id string works in your SDK)
-      wedgeNode.addComponent('mp.gltfLoader', { url: objectUrl });
+      // Minimal initial inputs per docs; transforms done on the node
+      wedgeNode.addComponent('mp.gltfLoader', { url: glbHttpUrl, visible: true });
       wedgeNode.scale.set(WEDGE_SCALE, WEDGE_SCALE, WEDGE_SCALE);
       wedgeNode.start();
     }
 
-    // Position & orientation
+    // Node transforms
     wedgeNode.position.set(pose.position.x, pose.position.y + HEIGHT_OFFSET, pose.position.z);
+
     const f = V(pose.forward.x, pose.forward.y, pose.forward.z);
-    const q = qNorm( qMul( quatFromZTo(f), qFromEulerDeg(AXIS_CORRECTION_EULER_DEG) ) );
+    const qAim = quatFromZTo(f);
+    const qFix = qFromEulerDeg(AXIS_CORRECTION_EULER_DEG);
+    const q = qNorm(qMul(qAim, qFix));
     wedgeNode.quaternion.set(q.x, q.y, q.z, q.w);
   }
 
+  // Diagnostics
   ['mpReady','mpPlaying','mpError','mpSdkError']
     .forEach(ev => viewer.addEventListener(ev, e => console.log(`[${ev}]`, e.detail ?? null)));
 
@@ -136,9 +135,9 @@
         });
       }
     } catch (e) {
-      console.warn('GLB path failed; Tag fallback', e);
-      try { await addCamTagFallback(sdk); set('SDK ✓ tag added (fallback)'); }
-      catch (e2) { set('SDK init error (see console)'); console.error('Tag fallback failed:', e2); }
+      console.warn('GLB path failed; using Mattertag fallback', e);
+      try { await addCamMattertagFallback(sdk); set('SDK ✓ tag added (fallback)'); }
+      catch (e2) { set('SDK init error (see console)'); console.error('Fallback failed:', e2); }
     }
   });
 
