@@ -24,7 +24,7 @@
         const [sceneObject] = await mpSdk.Scene.createObjects(1);
         const node = sceneObject.addNode();
 
-        const radius = 15; // Adjusted for 100' range with 100° FOV
+        const radius = 7.5; // Half of previous 15
         const height = 30.48; // 100 feet max range
         const radialSegments = 32;
         const heightSegments = 1;
@@ -43,11 +43,13 @@
           return;
         }
 
-        // Updated position from your click, with adjusted y for ceiling height (reduced from +1.5 to +0.5 to bring it down)
-        mesh.position.set(45.163084103962525, 1.921607406107577 + 0.5, -9.822255574310763);
+        // New position from your click
+        mesh.position.set(39.71388998629817, 2.924215536730796, -22.228952500751216);
 
-        // Rotation based on normal (pointing down, tilted for coverage)
-        mesh.rotation.set(THREE.MathUtils.degToRad(-90), 0, 0); // Adjust -90 for down, change for tilt
+        // Rotation based on normal (point along -normal for into room)
+        const direction = new THREE.Vector3(-0.706325689944616, -0.030665666616751495, 0.707222480281285).negate().normalize();
+        mesh.lookAt(mesh.position.clone().add(direction));
+        mesh.rotation.x -= Math.PI / 2; // Adjust to align cone axis (since default points y)
 
         mesh.scale.set(1, 1, 1);
 
