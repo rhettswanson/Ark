@@ -16,26 +16,21 @@
         const mpSdk = await showcase.contentWindow.MP_SDK.connect(showcase.contentWindow);
         console.log('SDK Connected:', mpSdk);
 
-        // Log position on click (keep for future adjustments)
-        mpSdk.Pointer.intersection.subscribe(intersection => console.log('Click Position:', intersection.position, 'Normal:', intersection.normal));
-
         const THREE = showcase.contentWindow.THREE;
 
-        mpSdk.Scene.register('custom.securityCamera', function () {
+        mpSdk.Scene.register('mp.securityCamera', function () {
           return {
-            name: 'custom.securityCamera',
+            name: 'mp.securityCamera',
             inputs: {
-              visible: true,
               nearPlane: 0.3,
               farPlane: 30.48, // 100 feet
               horizontalFOV: 100, // degrees
-              aspect: 100 / 60, // Assume vertical 60°
-              localPosition: { x: 45.46922907434792, y: 3.89746607269742, z: -9.821637249296977 },
+              aspect: 100 / 60, // Vertical 60° assumption (adjust if known)
+              localPosition: { x: 45.46922907434792, y: 3.89746607269742, z: -9.821637249296977 }, // Your Mattertag position
               localRotation: { x: -20, y: 0, z: 0 }, // Tilt down 20°, adjust as needed
               color: 0x00ff00, // Green
-              panEnabled: true,
-              panAngleDeg: 120,
-              panPeriodSec: 8
+              panPeriod: 8,
+              panAngle: 120
             },
             outputs: {},
             onInit: function () {
