@@ -16,6 +16,10 @@
         const mpSdk = await showcase.contentWindow.MP_SDK.connect(showcase.contentWindow);
         console.log('SDK Connected:', mpSdk);
 
+        mpSdk.Sweep.getData().then(data => console.log('All Sweeps:', data));
+
+        mpSdk.Sweep.current.subscribe(sweep => console.log('Current Sweep:', sweep));
+
         const THREE = showcase.contentWindow.THREE;
 
         const [sceneObject] = await mpSdk.Scene.createObjects(1);
