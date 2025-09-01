@@ -21,47 +21,77 @@
 
         const THREE = showcase.contentWindow.THREE;
 
+        // Register the SecurityCamera component
+        mpSdk.Scene.register('custom.securityCamera', function () {
+          return {
+            name: 'custom.securityCamera',
+            inputs: {
+              nearPlane: 0.3,
+              farPlane: 30.48, // 100 feet
+              horizontalFOV: 100, // degrees
+              aspect: 100 / 60, // Assume vertical 60°
+              localPosition: { x: 38.533267551194896, y: 3.1063737842226677, z: -23.40692846848303 },
+              localRotation: { x: -20, y: 0, z: 0 }, // Tilt down 20°, adjust as needed
+              color: 0x00ff00, // Green
+              panEnabled: true,
+              panAngleDeg: 120,
+              panPeriodSec: 8
+            },
+            outputs: {},
+            onInit: function () {
+              const T = this.context.three;
+              this.group = new T.Group();
+              this.yaw = new T.Group();
+              this.pitch = new T.Group();
+              this.group.add(this.yaw);
+              this.yaw.add(this.pitch);
+              this._buildFrustum();
+              this.outputs.objectRoot = this.group;
+              this._applyTransform();
+            },
+            onEvent: function (event) {
+              if (event === mpSdk.Scene.SceneEventType.UPDATE) {
+                this.lines.visible = this.inputs.visible;
+              }
+            },
+            onInputsUpdated: function () {
+              this._updateFrustum();
+            },
+            onDestroy: function () {
+              this.lines.geometry.dispose();
+              this.lines.material.dispose();
+            },
+            _updateFrustum: function () {
+              const fov = this.inputs.fov;
+              const aspect = this.inputs.aspect;
+              const range = this.inputs.range;
+
+              const halfFov = fov / 2;
+              const halfHeight = Math.tan(halfFov) * range;
+              const halfWidth = halfHeight * aspect;
+
+              const positions = new Float32Array([
+                0, 0, 0, -halfWidth, -halfHeight, -range,
+                0, 0, 0, -halfWidth, halfHeight, -range,
+                0, 0, 0, halfWidth, halfHeight, -range,
+                0, 0, 0, halfWidth, -halfHeight, -range,
+                -halfWidth, -halfHeight, -range, -halfWidth, halfHeight, -range,
+                -halfWidth, halfHeight, -range, halfWidth, halfHeight, -range,
+                halfWidth, halfHeight, -range, halfWidth, -halfHeight, -range,
+                halfWidth, -halfHeight, -range, -halfWidth, -halfHeight, -range,
+              ]);
+
+              this.lines.geometry.setAttribute('position', new T.BufferAttribute(positions, 3));
+            },
+          };
+        });
+
         const [sceneObject] = await mpSdk.Scene.createObjects(1);
         const node = sceneObject.addNode();
 
-        const radius = 7.5; // Half of 15, as per previous
-        const height = 30.48; // 100 feet max range
-        const radialSegments = 32;
-        const heightSegments = 1;
-
-        const geometry = new THREE.ConeGeometry(radius, height, radialSegments, heightSegments);
-        const material = new THREE.MeshBasicMaterial({ color: 0x00ff00, opacity: 0.5, transparent: true, side: THREE.DoubleSide });
-
-        const mesh = new THREE.Mesh(geometry, material);
+        node.addComponent('custom.securityCamera');
 
         node.start();
-
-        if (node.obj3D) {
-          node.obj3D.add(mesh);
-        } else {
-          console.error('node.obj3D is undefined');
-          return;
-        }
-
-        // New position from your click
-        mesh.position.set(38.533267551194896, 3.1063737842226677, -23.40692846848303);
-
-        // Rotation based on normal (point along -normal for into room)
-        const direction = new THREE.Vector3(-0.7098971363816121, -0.01190058780638801, 0.7042048223116973).negate().normalize();
-        mesh.lookAt(mesh.position.clone().add(direction));
-        mesh.rotation.x -= Math.PI / 2; // Align cone axis
-
-        mesh.scale.set(1, 1, 1);
-
-        // Panning animation (120 degrees over 8 seconds)
-        let angle = 0;
-        const panSpeed = (120 * (Math.PI / 180)) / 8; // radians per second
-        const animate = () => {
-          angle += panSpeed / 60; // Assume 60fps
-          mesh.rotation.y = Math.sin(angle) * (120 * (Math.PI / 180) / 2);
-          requestAnimationFrame(animate);
-        };
-        animate();
 
         console.log('FOV cone added!');
       } catch (e) {
