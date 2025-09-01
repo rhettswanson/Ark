@@ -16,28 +16,26 @@
         const mpSdk = await showcase.contentWindow.MP_SDK.connect(showcase.contentWindow);
         console.log('SDK Connected:', mpSdk);
 
-        // Log Mattertags for position
-        mpSdk.Tag.data.subscribe({
-          onCollectionUpdated: function (collection) {
-            console.log('Mattertags:', collection);
-          }
-        });
+        // Log position on click (keep for future adjustments)
+        mpSdk.Pointer.intersection.subscribe(intersection => console.log('Click Position:', intersection.position, 'Normal:', intersection.normal));
 
         const THREE = showcase.contentWindow.THREE;
 
-        mpSdk.Scene.register('mp.securityCamera', function () {
+        mpSdk.Scene.register('custom.securityCamera', function () {
           return {
-            name: 'mp.securityCamera',
+            name: 'custom.securityCamera',
             inputs: {
+              visible: true,
               nearPlane: 0.3,
               farPlane: 30.48, // 100 feet
-              horizontalFOV: 100,
-              aspect: 100 / 60, // Vertical 60° assumption
-              localPosition: { x: 0, y: 1.5, z: 0 }, // Placeholder, update with Mattertag
-              localRotation: { x: -20, y: 0, z: 0 }, // Tilt down
+              horizontalFOV: 100, // degrees
+              aspect: 100 / 60, // Assume vertical 60°
+              localPosition: { x: 45.46922907434792, y: 3.89746607269742, z: -9.821637249296977 },
+              localRotation: { x: -20, y: 0, z: 0 }, // Tilt down 20°, adjust as needed
               color: 0x00ff00, // Green
-              panPeriod: 8,
-              panAngle: 120
+              panEnabled: true,
+              panAngleDeg: 120,
+              panPeriodSec: 8
             },
             outputs: {},
             onInit: function () {
@@ -87,12 +85,14 @@
               const frustum = new T.Mesh(geom, mat);
               frustum.scale.x = aspect;
               this.mesh = frustum;
-              const footprintGeometry = new T.CircleGeometry(farR * aspect, 64);
-              footprintGeometry.rotateX(-Math.PI / 2);
-              const footprintMaterial = new T.MeshBasicMaterial({ color: this.inputs.color, opacity: 0.25, transparent: true, side: T.DoubleSide });
-              this.footprint = new T.Mesh(footprintGeometry, footprintMaterial);
+              const footprint = new T.LineLoop(
+                new T.CircleGeometry(farR * aspect, 64),
+                new T.LineBasicMaterial({ color: this.inputs.color, transparent: true, opacity: 0.25 })
+              );
+              footprint.position.y = far;
+              footprint.rotation.x = Math.PI / 2;
               this.pitch.add(this.mesh);
-              this.pitch.add(this.footprint);
+              this.pitch.add(footprint);
             },
             _rebuildFrustum: function () {
               this.pitch.remove(this.mesh);
@@ -100,7 +100,10 @@
               this._buildFrustum();
             },
             _update: function () {
-              if (this.mixer) this.mixer.update(1 / 60);
+              this._t += 1 / 60; // assume 60fps
+              const angle = this.inputs.panAngle * (Math.PI / 180);
+              const period = this.inputs.panPeriod;
+              this.yaw.rotation.y = Math.sin(this._t * (2 * Math.PI / period)) * (angle / 2);
             },
             _applyTransform: function () {
               this.group.position.set(this.inputs.localPosition.x, this.inputs.localPosition.y, this.inputs.localPosition.z);
@@ -133,7 +136,7 @@
         const [sceneObject] = await mpSdk.Scene.createObjects(1);
         const node = sceneObject.addNode();
 
-        node.addComponent('mp.securityCamera');
+        node.addComponent('custom.securityCamera');
 
         node.start();
 
