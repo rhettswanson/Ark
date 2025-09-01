@@ -44,10 +44,10 @@
         }
 
         // New position from your click
-        mesh.position.set(39.71388998629817, 2.924215536730796, -22.228952500751216);
+        mesh.position.set(43.089187718117856, 2.838908126057243, -18.86545056136046);
 
         // Rotation based on normal (point along -normal for into room)
-        const direction = new THREE.Vector3(-0.706325689944616, -0.030665666616751495, 0.707222480281285).negate().normalize();
+        const direction = new THREE.Vector3(-0.7117210333243945, -0.038079340996470444, 0.7014293510489353).negate().normalize();
         mesh.lookAt(mesh.position.clone().add(direction));
         mesh.rotation.x -= Math.PI / 2; // Adjust to align cone axis (since default points y)
 
