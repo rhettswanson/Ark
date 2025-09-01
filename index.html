@@ -16,121 +16,49 @@
         const mpSdk = await showcase.contentWindow.MP_SDK.connect(showcase.contentWindow);
         console.log('SDK Connected:', mpSdk);
 
-        const THREE = showcase.contentWindow.THREE;
+        // Log position on click
+        mpSdk.Pointer.intersection.subscribe(intersection => console.log('Click Position:', intersection.position, 'Normal:', intersection.normal));
 
-        mpSdk.Scene.register('custom.securityCamera', function () {
-          return {
-            name: 'custom.securityCamera',
-            inputs: {
-              visible: true,
-              nearPlane: 0.3,
-              farPlane: 30.48, // 100 feet max range
-              horizontalFOV: 100 * (Math.PI / 180), // Horizontal FOV
-              aspect: 100 / 60, // Assume vertical 60 degrees
-              localPosition: { x: 43.42692565917969, y: 1.69221031665802 + 1.5, z: -10.642154693603516 }, // Cafeteria position, y +1.5 for height
-              localRotation: { x: 0.01823436446600411, y: 0.9397931254942198, z: -0.02440718531346457 }, // Tilted down a bit
-              color: 0x00ff00, // Green
-              panEnabled: true,
-              panAngleDeg: 120, // Pan 120 degrees
-              panPeriodSec: 8 // Pan speed
-            },
-            outputs: {},
-            onInit: function () {
-              const T = this.context.three;
-              this._t = 0;
-              this.group = new T.Group(); // world pose
-              this.yaw = new T.Group(); // swivel (left/right)
-              this.pitch = new T.Group(); // keep for tilt
-              this.group.add(this.yaw);
-              this.yaw.add(this.pitch);
-              this._buildFrustum();
-              this.outputs.objectRoot = this.group;
-              this._applyTransform();
-            },
-            onEvent: function (event) {
-              if (event === mpSdk.Scene.SceneEventType.UPDATE) {
-                this._update();
-              }
-            },
-            onInputsUpdated: function () {
-              this._rebuildFrustum();
-              this._applyTransform();
-            },
-            onDestroy: function () {
-              this.mesh.geometry.dispose();
-              this.mesh.material.dispose();
-              this.footprint.geometry.dispose();
-              this.footprint.material.dispose();
-            },
-            _buildFrustum: function () {
-              const T = this.context.three;
-              const hFov = this.inputs.horizontalFOV;
-              const aspect = this.inputs.aspect;
-              const near = this.inputs.nearPlane;
-              const far = Math.max(near + 0.01, this.inputs.farPlane);
-              const nearR = Math.tan(hFov / 2) * near;
-              const farR = Math.tan(hFov / 2) * far;
-              // Hollow frustum
-              const geom = new T.CylinderGeometry(nearR, farR, far - near, 48, 1, true);
-              geom.translate(0, (far - near) / 2, 0);
-              geom.rotateX(Math.PI / 2);
-              const mat = new T.MeshBasicMaterial({
-                color: this.inputs.color,
-                transparent: true,
-                opacity: 0.35,
-                depthWrite: false
-              });
-              const frustum = new T.Mesh(geom, mat);
-              frustum.scale.x = aspect;
-              this.mesh = frustum;
-              // Footprint arc
-              const footprint = new T.LineLoop(
-                new T.CircleGeometry(farR * aspect, 64),
-                new T.LineBasicMaterial({ color: this.inputs.color, transparent: true, opacity: 0.25 })
-              );
-              footprint.position.y = far;
-              footprint.rotation.x = Math.PI / 2;
-              this.pitch.add(this.mesh);
-              this.pitch.add(footprint);
-            },
-            _rebuildFrustum: function () {
-              this.pitch.remove(this.mesh);
-              this.pitch.remove(this.footprint);
-              this._buildFrustum();
-            },
-            _update: function () {
-              if (this.inputs.panEnabled) {
-                this._t += 1 / 60; // assume 60fps
-                const angle = this.inputs.panAngleDeg * (Math.PI / 180);
-                const period = this.inputs.panPeriodSec;
-                this.yaw.rotation.y = Math.sin(this._t * (2 * Math.PI / period)) * (angle / 2);
-              }
-            },
-            _applyTransform: function () {
-              this.group.position.set(this.inputs.localPosition.x, this.inputs.localPosition.y, this.inputs.localPosition.z);
-              this.group.rotation.set(this.inputs.localRotation.x, this.inputs.localRotation.y, this.inputs.localRotation.z);
-            }
-          };
-        });
+        const THREE = showcase.contentWindow.THREE;
 
         const [sceneObject] = await mpSdk.Scene.createObjects(1);
         const node = sceneObject.addNode();
 
-        node.addComponent('custom.securityCamera', {
-          visible: true,
-          nearPlane: 0.3,
-          farPlane: 30.48,
-          horizontalFOV: 100 * (Math.PI / 180),
-          aspect: 100 / 60,
-          localPosition: { x: 43.42692565917969, y: 1.69221031665802 + 1.5, z: -10.642154693603516 },
-          localRotation: { x: 0.01823436446600411, y: 0.9397931254942198, z: -0.02440718531346457 },
-          color: 0x00ff00,
-          panEnabled: true,
-          panAngleDeg: 120,
-          panPeriodSec: 8
-        });
+        const radius = 5; // Half width at max range
+        const height = 30.48; // 100 feet max range
+        const radialSegments = 32;
+        const heightSegments = 1;
+
+        const geometry = new THREE.ConeGeometry(radius, height, radialSegments, heightSegments);
+        const material = new THREE.MeshBasicMaterial({ color: 0x00ff00, opacity: 0.5, transparent: true, side: THREE.DoubleSide });
+
+        const mesh = new THREE.Mesh(geometry, material);
 
         node.start();
+
+        if (node.obj3D) {
+          node.obj3D.add(mesh);
+        } else {
+          console.error('node.obj3D is undefined');
+          return;
+        }
+
+        // Placeholder position from sweep, with lower y to bring it down
+        mesh.position.set(43.42692565917969, 2.5, -10.642154693603516); // Adjusted y to 2.5 for testing
+
+        mesh.rotation.set(THREE.MathUtils.degToRad(-90), 0, 0); // Tilted down
+
+        mesh.scale.set(1, 1, 1);
+
+        // Basic panning animation (120 degrees over 8 seconds)
+        let angle = 0;
+        const panSpeed = (120 * (Math.PI / 180)) / 8; // radians per second
+        const animate = () => {
+          angle += panSpeed / 60; // Assume 60fps
+          mesh.rotation.y = Math.sin(angle) * (120 * (Math.PI / 180) / 2);
+          requestAnimationFrame(animate);
+        };
+        animate();
 
         console.log('FOV cone added!');
       } catch (e) {
