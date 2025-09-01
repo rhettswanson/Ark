@@ -16,8 +16,14 @@
         const mpSdk = await showcase.contentWindow.MP_SDK.connect(showcase.contentWindow);
         console.log('SDK Connected:', mpSdk);
 
-        mpSdk.Sweep.getData().then(data => console.log('All Sweeps:', data));
+        // Log all sweeps using subscribe
+        mpSdk.Sweep.data.subscribe({
+          onCollectionUpdated: function (collection) {
+            console.log('All Sweeps:', collection);
+          }
+        });
 
+        // Subscribe to current sweep changes
         mpSdk.Sweep.current.subscribe(sweep => console.log('Current Sweep:', sweep));
 
         const THREE = showcase.contentWindow.THREE;
