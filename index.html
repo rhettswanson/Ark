@@ -23,12 +23,12 @@
             name: 'mp.securityCamera',
             inputs: {
               nearPlane: 0.3,
-              farPlane: 30.48, // 100 feet
-              horizontalFOV: 100, // degrees
-              aspect: 100 / 60, // Vertical 60° assumption (adjust if known)
-              localPosition: { x: 45.46922907434792, y: 3.89746607269742, z: -9.821637249296977 }, // Your Mattertag position
-              localRotation: { x: -20, y: 0, z: 0 }, // Tilt down 20°, adjust as needed
-              color: 0x00ff00, // Green
+              farPlane: 30.48,
+              horizontalFOV: 100,
+              aspect: 100 / 60,
+              localPosition: { x: 38.533267551194896, y: 3.1063737842226677, z: -23.40692846848303 },
+              localRotation: { x: -20, y: 0, z: 0 },
+              color: 0x00ff00,
               panPeriod: 8,
               panAngle: 120
             },
@@ -40,71 +40,76 @@
               this.pitch = new T.Group();
               this.group.add(this.yaw);
               this.yaw.add(this.pitch);
-              this._buildFrustum();
+              this.makeFrustumVisuals();
               this.outputs.objectRoot = this.group;
-              this._applyTransform();
-              this._makeAnimation();
+              this.makeAnimation();
             },
-            onEvent: function (event) {
-              if (event === mpSdk.Scene.SceneEventType.UPDATE) {
-                this._update();
+            onTick: function (delta) {
+              if (this.mixer) {
+                this.mixer.update(delta / 1000);
               }
             },
             onInputsUpdated: function () {
-              this._rebuildFrustum();
-              this._applyTransform();
+              this.makeFrustumVisuals();
             },
             onDestroy: function () {
-              this.mesh.geometry.dispose();
-              this.mesh.material.dispose();
-              this.footprint.geometry.dispose();
-              this.footprint.material.dispose();
+              if (this.box) {
+                this.box.geometry.dispose();
+                this.box.material.dispose();
+              }
+              if (this.edges) {
+                this.edges.geometry.dispose();
+                this.edges.material.dispose();
+              }
             },
-            _buildFrustum: function () {
+            makeFrustumVisuals: function () {
               const T = this.context.three;
-              const hFov = this.inputs.horizontalFOV * (Math.PI / 180);
-              const aspect = this.inputs.aspect;
-              const near = this.inputs.nearPlane;
-              const far = Math.max(near + 0.01, this.inputs.farPlane);
-              const nearR = Math.tan(hFov / 2) * near;
-              const farR = Math.tan(hFov / 2) * far;
-              const geom = new T.CylinderGeometry(nearR, farR, far - near, 48, 1, true);
-              geom.translate(0, (far - near) / 2, 0);
-              geom.rotateX(Math.PI / 2);
-              const mat = new T.MeshBasicMaterial({
+              if (this.box) {
+                this.pitch.remove(this.box);
+                this.box.geometry.dispose();
+                this.box.material.dispose();
+              }
+              if (this.edges) {
+                this.pitch.remove(this.edges);
+                this.edges.geometry.dispose();
+                this.edges.material.dispose();
+              }
+              const frustumLength = this.inputs.farPlane - this.inputs.nearPlane;
+              const boxGeometry = new T.BoxGeometry(2, 2, frustumLength);
+              const halfHAngle = (this.inputs.horizontalFOV * 0.5 * Math.PI) / 180;
+              const nearHalfWidth = Math.tan(halfHAngle) * this.inputs.nearPlane;
+              const farHalfWidth = Math.tan(halfHAngle) * this.inputs.farPlane;
+              const nearHalfHeight = nearHalfWidth / this.inputs.aspect;
+              const farHalfHeight = farHalfWidth / this.inputs.aspect;
+              const positions = boxGeometry.attributes.position;
+              for (let i = 0; i < positions.count; i++) {
+                const vertexZ = positions.getZ(i);
+                const vertexX = positions.getX(i);
+                const vertexY = positions.getY(i);
+                if (vertexZ > 0) {
+                  positions.setX(i, vertexX * nearHalfWidth);
+                  positions.setY(i, vertexY * nearHalfHeight);
+                } else {
+                  positions.setX(i, vertexX * farHalfWidth);
+                  positions.setY(i, vertexY * farHalfHeight);
+                }
+                positions.setZ(i, vertexZ - 0.5 * frustumLength - this.inputs.nearPlane);
+              }
+              const boxMaterial = new T.MeshBasicMaterial({
                 color: this.inputs.color,
+                opacity: 0.05,
                 transparent: true,
-                opacity: 0.35,
-                depthWrite: false
+                side: T.BackSide,
+                blending: T.NormalBlending,
+                depthWrite: false,
               });
-              const frustum = new T.Mesh(geom, mat);
-              frustum.scale.x = aspect;
-              this.mesh = frustum;
-              const footprint = new T.LineLoop(
-                new T.CircleGeometry(farR * aspect, 64),
-                new T.LineBasicMaterial({ color: this.inputs.color, transparent: true, opacity: 0.25 })
-              );
-              footprint.position.y = far;
-              footprint.rotation.x = Math.PI / 2;
-              this.pitch.add(this.mesh);
-              this.pitch.add(footprint);
+              this.box = new T.Mesh(boxGeometry, boxMaterial);
+              const edgesGeometry = new T.EdgesGeometry(boxGeometry);
+              this.edges = new T.LineSegments(edgesGeometry, new T.LineBasicMaterial({ color: 0xffffff, opacity: 0.25, transparent: true, blending: T.AdditiveBlending, depthWrite: false }));
+              this.pitch.add(this.box);
+              this.pitch.add(this.edges);
             },
-            _rebuildFrustum: function () {
-              this.pitch.remove(this.mesh);
-              this.pitch.remove(this.footprint);
-              this._buildFrustum();
-            },
-            _update: function () {
-              this._t += 1 / 60; // assume 60fps
-              const angle = this.inputs.panAngle * (Math.PI / 180);
-              const period = this.inputs.panPeriod;
-              this.yaw.rotation.y = Math.sin(this._t * (2 * Math.PI / period)) * (angle / 2);
-            },
-            _applyTransform: function () {
-              this.group.position.set(this.inputs.localPosition.x, this.inputs.localPosition.y, this.inputs.localPosition.z);
-              this.group.rotation.set(this.inputs.localRotation.x, this.inputs.localRotation.y, this.inputs.localRotation.z);
-            },
-            _makeAnimation: function () {
+            makeAnimation: function () {
               const T = this.context.three;
               const yAxis = new T.Vector3(0, 1, 0);
               const frame0 = new T.Quaternion().setFromAxisAngle(yAxis, 0);
@@ -124,6 +129,13 @@
               const action = this.mixer.clipAction(clip);
               action.loop = T.LoopPingPong;
               action.play();
+            },
+            _update: function () {
+              if (this.mixer) this.mixer.update(1 / 60);
+            },
+            _applyTransform: function () {
+              this.group.position.set(this.inputs.localPosition.x, this.inputs.localPosition.y, this.inputs.localPosition.z);
+              this.group.rotation.set(this.inputs.localRotation.x, this.inputs.localRotation.y, this.inputs.localRotation.z);
             }
           };
         });
@@ -131,7 +143,7 @@
         const [sceneObject] = await mpSdk.Scene.createObjects(1);
         const node = sceneObject.addNode();
 
-        node.addComponent('custom.securityCamera');
+        node.addComponent('mp.securityCamera');
 
         node.start();
 
