@@ -16,7 +16,7 @@
         const mpSdk = await showcase.contentWindow.MP_SDK.connect(showcase.contentWindow);
         console.log('SDK Connected:', mpSdk);
 
-        // Log position on click
+        // Log position on click (keep for future adjustments)
         mpSdk.Pointer.intersection.subscribe(intersection => console.log('Click Position:', intersection.position, 'Normal:', intersection.normal));
 
         const THREE = showcase.contentWindow.THREE;
@@ -24,7 +24,7 @@
         const [sceneObject] = await mpSdk.Scene.createObjects(1);
         const node = sceneObject.addNode();
 
-        const radius = 5; // Half width at max range
+        const radius = 5; // Half width at max range (adjust based on FOV)
         const height = 30.48; // 100 feet max range
         const radialSegments = 32;
         const heightSegments = 1;
@@ -43,14 +43,15 @@
           return;
         }
 
-        // Placeholder position from sweep, with lower y to bring it down
-        mesh.position.set(43.42692565917969, 2.5, -10.642154693603516); // Adjusted y to 2.5 for testing
+        // Position from your click
+        mesh.position.set(45.1631061415796, 3.892982125997871, -9.660174781706882);
 
-        mesh.rotation.set(THREE.MathUtils.degToRad(-90), 0, 0); // Tilted down
+        // Rotation based on normal (pointing along z, tilted down a bit)
+        mesh.rotation.set(THREE.MathUtils.degToRad(-20), 0, 0); // Adjust -20 for tilt angle as needed
 
         mesh.scale.set(1, 1, 1);
 
-        // Basic panning animation (120 degrees over 8 seconds)
+        // Panning animation (120 degrees over 8 seconds)
         let angle = 0;
         const panSpeed = (120 * (Math.PI / 180)) / 8; // radians per second
         const animate = () => {
